@@ -22,8 +22,6 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import jwt
-from google.oauth2 import id_token as google_id_token
-from google.auth.transport import requests as google_requests
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID")
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-me")
