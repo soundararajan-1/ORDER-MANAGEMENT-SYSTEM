@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Header
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import jwt
@@ -28,6 +29,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "REPLACE_WITH_YOUR_GOOGLE_
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-me")
 JWT_ALGO = "HS256"
 DB_PATH = os.path.join(os.path.dirname(__file__), "orderflow.db")
+FRONTEND_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html"))
 
 app = FastAPI(title="OrderFlow AI")
 
@@ -38,6 +40,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+def serve_index():
+    if os.path.exists(FRONTEND_FILE):
+        return FileResponse(FRONTEND_FILE)
+    return {"message": "OrderFlow AI API is running. Visit /docs for Swagger documentation."}
 
 # ---------------------------------------------------------------- database
 

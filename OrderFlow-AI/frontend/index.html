@@ -129,9 +129,15 @@
 
 <script>
 /* ================= CONFIG ================= */
+const urlParams = new URLSearchParams(window.location.search);
+const overrideApi = urlParams.get("api");
+const isDevFrontend = window.location.port === "5500" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
 const CONFIG = {
-  API_BASE: "http://localhost:8000",
-  WS_BASE: "ws://localhost:8000",
+  API_BASE: overrideApi || (isDevFrontend ? "http://localhost:8000" : window.location.origin),
+  WS_BASE: overrideApi 
+    ? overrideApi.replace(/^http/, "ws") 
+    : (isDevFrontend ? "ws://localhost:8000" : (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host),
 };
 
 /* ================= STATE ================= */
