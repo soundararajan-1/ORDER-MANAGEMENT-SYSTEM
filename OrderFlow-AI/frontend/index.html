@@ -1,0 +1,1720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OrderFlow AI — Multi-Seller Real-Time Operations</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cyan:#00E5FF; --purple:#7C3AED; --indigo:#4338CA; --pink:#EC4899;
+    --amber:#F59E0B; --red:#EF4444; --emerald:#10B981;
+    --navy:#050816;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--navy); color:#e8ecff;
+    font-family:'Inter',sans-serif; overflow-x:hidden; min-height:100vh;
+  }
+  h1,h2,h3,h4,.display{font-family:'Space Grotesk',sans-serif;}
+
+  /* ---------- aurora background ---------- */
+  .aurora-wrap{position:fixed; inset:0; z-index:0; overflow:hidden; background:var(--navy);}
+  .blob{position:absolute; border-radius:50%; filter:blur(75px); opacity:.55; mix-blend-mode:screen;}
+  .b1{width:560px;height:560px; background:radial-gradient(circle,var(--purple),transparent 70%); top:-10%; left:-5%; animation:float1 22s ease-in-out infinite;}
+  .b2{width:500px;height:500px; background:radial-gradient(circle,var(--cyan),transparent 70%); bottom:-10%; right:0%; animation:float2 26s ease-in-out infinite;}
+  .b3{width:420px;height:420px; background:radial-gradient(circle,var(--pink),transparent 70%); top:35%; left:45%; animation:float3 30s ease-in-out infinite;}
+  .stars{position:absolute; inset:0; background-image:radial-gradient(1px 1px at 20% 30%, #ffffff55 1px, transparent 0),
+    radial-gradient(1px 1px at 70% 60%, #ffffff33 1px, transparent 0),
+    radial-gradient(1px 1px at 40% 80%, #ffffff44 1px, transparent 0),
+    radial-gradient(1px 1px at 90% 20%, #ffffff33 1px, transparent 0);
+    background-size: 600px 600px; opacity:.6;}
+  @keyframes float1{0%,100%{transform:translate(0,0)}50%{transform:translate(80px,60px)}}
+  @keyframes float2{0%,100%{transform:translate(0,0)}50%{transform:translate(-70px,-50px)}}
+  @keyframes float3{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-40px,50px) scale(1.15)}}
+
+  /* ---------- glassmorphism ---------- */
+  .glass{
+    background:rgba(255,255,255,0.05);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    border:1px solid rgba(255,255,255,0.12);
+    border-radius:24px;
+    box-shadow: 0 0 0 1px rgba(124,58,237,0.08), 0 20px 60px -20px rgba(0,229,255,0.12);
+    transition: transform .3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow .3s ease;
+  }
+  .glass:hover{ transform:translateY(-2px); box-shadow:0 0 40px -5px rgba(0,229,255,.2), 0 0 70px -20px rgba(124,58,237,.3);}
+  .glow-border{ position:relative; }
+  .glow-border::before{
+    content:''; position:absolute; inset:-1px; border-radius:inherit; padding:1px;
+    background:linear-gradient(120deg,var(--cyan),var(--purple),var(--pink),var(--cyan));
+    background-size:300% 300%; animation:borderMove 6s linear infinite;
+    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor; mask-composite:exclude; opacity:.55; pointer-events:none;
+  }
+  @keyframes borderMove{0%{background-position:0% 50%}100%{background-position:300% 50%}}
+
+  /* ---------- floating tabs ---------- */
+  .tab{
+    padding:.55rem 1.15rem; border-radius:999px; font-size:.85rem; font-weight:500;
+    color:#c9d3ff; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(10px); cursor:pointer; white-space:nowrap;
+    transition: all .25s ease; animation: tabFloat 5s ease-in-out infinite;
+  }
+  .tab:hover{ transform:translateY(-2px) scale(1.03); background:rgba(255,255,255,0.09); color:#fff; }
+  .tab.active{
+    color:#fff; background:linear-gradient(120deg, rgba(0,229,255,.25), rgba(124,58,237,.35));
+    border-color:rgba(0,229,255,.5);
+    box-shadow:0 0 25px -3px rgba(0,229,255,.55), 0 0 35px -5px rgba(124,58,237,.55);
+  }
+  @keyframes tabFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+
+  /* ---------- misc animations ---------- */
+  @keyframes fadeUp{from{opacity:0; transform:translateY(14px)} to{opacity:1; transform:translateY(0)}}
+  .fade-up{animation:fadeUp .45s ease both;}
+  @keyframes pulseGlow{0%,100%{box-shadow:0 0 10px rgba(0,229,255,.35)}50%{box-shadow:0 0 25px rgba(0,229,255,.7)}}
+  .pulse{animation:pulseGlow 2.2s ease-in-out infinite;}
+  @keyframes popIn{from{opacity:0; transform:scale(.88)}to{opacity:1; transform:scale(1)}}
+  .pop-in{animation:popIn .3s cubic-bezier(.2,1.3,.4,1) both;}
+  .btn-neon{
+    background:linear-gradient(120deg,var(--cyan),var(--purple));
+    color:#03131a; font-weight:600; border-radius:14px; padding:.65rem 1.3rem;
+    transition:transform .2s ease, box-shadow .2s ease; box-shadow:0 0 20px -4px rgba(0,229,255,.6);
+  }
+  .btn-neon:hover{transform:translateY(-2px); box-shadow:0 0 30px -2px rgba(0,229,255,.85);}
+  .btn-danger{
+    background:linear-gradient(120deg,#ef4444,#dc2626);
+    color:#fff; font-weight:600; border-radius:12px; padding:.45rem .9rem;
+    transition:transform .2s ease, box-shadow .2s ease;
+  }
+  .btn-danger:hover{transform:translateY(-1px); box-shadow:0 0 20px -2px rgba(239,68,68,.7);}
+  .btn-warning{
+    background:linear-gradient(120deg,#f59e0b,#d97706);
+    color:#0a0d1e; font-weight:600; border-radius:12px; padding:.45rem .9rem;
+    transition:transform .2s ease, box-shadow .2s ease;
+  }
+  .btn-warning:hover{transform:translateY(-1px); box-shadow:0 0 20px -2px rgba(245,158,11,.7);}
+
+  .scrollbar-thin::-webkit-scrollbar{width:6px;height:6px;}
+  .scrollbar-thin::-webkit-scrollbar-thumb{background:rgba(0,229,255,.4); border-radius:10px;}
+
+  .timeline-dot{width:14px;height:14px;border-radius:50%; box-shadow:0 0 12px currentColor;}
+  .timeline-line{height:3px; background:rgba(255,255,255,.12); position:relative; flex:1;}
+  .timeline-fill{position:absolute; inset:0; background:linear-gradient(90deg,var(--cyan),var(--purple)); border-radius:3px; transition:width .6s ease;}
+
+  .hidden{display:none !important;}
+  .toast{animation: slideIn .3s ease both;}
+  @keyframes slideIn{from{opacity:0; transform:translateX(40px)} to{opacity:1; transform:translateX(0)}}
+
+  #confetti-canvas{position:fixed; inset:0; pointer-events:none; z-index:70;}
+  .modal-backdrop{position:fixed; inset:0; background:rgba(5,8,22,0.85); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); z-index:50;}
+</style>
+</head>
+<body>
+
+<div class="aurora-wrap">
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+  <div class="stars"></div>
+</div>
+<canvas id="confetti-canvas"></canvas>
+<div id="toast-root" class="fixed top-6 right-6 z-50 flex flex-col gap-2"></div>
+<div id="modal-root"></div>
+
+<div id="app" class="relative z-10 min-h-screen"></div>
+
+<script>
+/* ================= CONFIG ================= */
+const CONFIG = {
+  API_BASE: "http://localhost:8000",
+  WS_BASE: "ws://localhost:8000",
+};
+
+/* ================= STATE ================= */
+const state = {
+  token: null, user: null, role: null,
+  products: [], cart: [], orders: [], analytics: null, ws: null,
+  soundEnabled: true,
+  shopSellerFilter: "all",
+  sellerOrderFilter: "All",
+  sellerSearch: "",
+  sellerSort: "newest",
+  sellerPage: 1,
+  sellerPageSize: 8,
+};
+
+/* ================= AUDIO CHIME ================= */
+function playOrderChime() {
+  if (!state.soundEnabled) return;
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    if (ctx.state === "suspended") ctx.resume();
+    const now = ctx.currentTime;
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(587.33, now); // D5
+    osc1.frequency.exponentialRampToValueAtTime(880, now + 0.12); // A5
+
+    osc2.type = "triangle";
+    osc2.frequency.setValueAtTime(880, now);
+    osc2.frequency.exponentialRampToValueAtTime(1174.66, now + 0.12); // D6
+
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.6);
+    osc2.stop(now + 0.6);
+  } catch(e) {}
+}
+
+/* ================= HELPERS ================= */
+function toast(msg, kind="info"){
+  const root = document.getElementById("toast-root");
+  const el = document.createElement("div");
+  const color = kind==="success" ? "border-emerald-400/60 shadow-emerald-500/20" :
+                kind==="error" ? "border-red-400/60 shadow-red-500/20" :
+                kind==="warning" ? "border-amber-400/60 shadow-amber-500/20" :
+                "border-cyan-400/60 shadow-cyan-500/20";
+  el.className = `toast glass ${color} shadow-lg px-4 py-3 text-sm max-w-sm flex items-center gap-2.5`;
+  const icon = kind==="success" ? "✓" : kind==="error" ? "✕" : kind==="warning" ? "⚠️" : "⚡";
+  el.innerHTML = `<span class="font-bold">${icon}</span> <span>${msg}</span>`;
+  root.appendChild(el);
+  setTimeout(()=>{ el.style.opacity="0"; el.style.transition="opacity .4s"; setTimeout(()=>el.remove(),400); }, 3800);
+}
+
+async function api(path, opts={}){
+  const headers = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
+  if(state.token) headers["Authorization"] = "Bearer " + state.token;
+  const res = await fetch(CONFIG.API_BASE + path, Object.assign({}, opts, {headers}));
+  if(!res.ok){
+    let detail = res.statusText;
+    try{ detail = (await res.json()).detail || detail; }catch(e){}
+    throw new Error(detail);
+  }
+  return res.status===204 ? null : res.json();
+}
+
+function countUp(el, target, prefix="", suffix=""){
+  let cur = 0; const step = Math.max(target/40, 1);
+  const iv = setInterval(()=>{
+    cur += step;
+    if(cur >= target){ cur = target; clearInterval(iv); }
+    el.textContent = prefix + Math.round(cur).toLocaleString() + suffix;
+  }, 20);
+}
+
+function confettiBurst(){
+  const canvas = document.getElementById("confetti-canvas");
+  canvas.width = innerWidth; canvas.height = innerHeight;
+  const ctx = canvas.getContext("2d");
+  const colors = ["#00E5FF","#7C3AED","#EC4899","#22c55e","#F59E0B"];
+  const pieces = Array.from({length:140}, ()=>({
+    x: innerWidth/2, y: innerHeight/2,
+    vx:(Math.random()-.5)*16, vy:(Math.random()-1.3)*16,
+    size: 4+Math.random()*6, color: colors[Math.floor(Math.random()*colors.length)],
+    life: 70+Math.random()*30,
+  }));
+  let frame=0;
+  function tick(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    frame++;
+    let alive=false;
+    pieces.forEach(p=>{
+      if(p.life<=0) return;
+      alive=true;
+      p.x+=p.vx; p.y+=p.vy; p.vy+=0.35; p.life--;
+      ctx.fillStyle=p.color; ctx.globalAlpha = Math.max(p.life/90,0);
+      ctx.fillRect(p.x,p.y,p.size,p.size);
+    });
+    ctx.globalAlpha=1;
+    if(alive && frame<160) requestAnimationFrame(tick); else ctx.clearRect(0,0,canvas.width,canvas.height);
+  }
+  tick();
+}
+
+/* ================= WEBSOCKET ================= */
+function connectWebSocket(){
+  if(state.ws) {
+    try { state.ws.close(); } catch(e){}
+  }
+  const ws = new WebSocket(`${CONFIG.WS_BASE}/ws/${state.role}/${state.user.id}`);
+  ws.onopen = ()=> setInterval(()=>{ if(ws.readyState===1) ws.send("ping"); }, 20000);
+  ws.onmessage = (ev)=>{
+    const msg = JSON.parse(ev.data);
+
+    // 1. Incoming new order (Sent specifically to THIS particular seller!)
+    if(state.role === "seller" && msg.type === "new_order"){
+      playOrderChime();
+      toast(`⚡ Incoming Order #${msg.order.id} — ₹${msg.order.amount.toLocaleString()}`, "success");
+      state.orders.unshift(msg.order);
+      refreshActiveSellerTab();
+    }
+
+    // 2. Order status update
+    if(msg.type === "status_update"){
+      const idx = state.orders.findIndex(o=>o.id===msg.order.id);
+      if(idx>-1) state.orders[idx] = msg.order; else state.orders.unshift(msg.order);
+
+      if(state.role === "seller"){
+        refreshActiveSellerTab();
+      }
+      if(state.role === "customer"){
+        const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab || "My Orders";
+        if(activeTab === "My Orders") {
+          renderCustomerOrders();
+        }
+        if(msg.order.status === "Completed") {
+          confettiBurst();
+          toast(`🎉 Order #${msg.order.id} has been Delivered!`, "success");
+        } else if(msg.order.status === "Delayed") {
+          toast(`⚠️ Order #${msg.order.id} Delayed (ETA ${msg.order.eta}): ${msg.order.delay_reason || 'In Transit'}`, "warning");
+        } else if(msg.order.status === "Cancelled") {
+          toast(`Order #${msg.order.id} was Cancelled (Inventory refunded)`, "error");
+        } else {
+          toast(`Order #${msg.order.id} status: ${msg.order.status}`, "success");
+        }
+      }
+    }
+
+    // 3. Inventory update
+    if(msg.type === "inventory_update"){
+      const pIdx = state.products.findIndex(p=>p.id===msg.product.id);
+      if(pIdx>-1) state.products[pIdx] = msg.product; else state.products.push(msg.product);
+
+      if(state.role === "customer") {
+        const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab || "Shop";
+        if(activeTab === "Shop") renderShop(false);
+      } else if(state.role === "seller") {
+        const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab;
+        if(activeTab === "Products & Stock") renderInventory();
+        else if(activeTab === "Overview") renderSellerOverview();
+      }
+    }
+
+    // 4. Product added
+    if(msg.type === "product_added"){
+      const pIdx = state.products.findIndex(p=>p.id===msg.product.id);
+      if(pIdx===-1) state.products.push(msg.product);
+      if(state.role === "customer") {
+        const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab || "Shop";
+        if(activeTab === "Shop") renderShop(false);
+      } else if(state.role === "seller") {
+        const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab;
+        if(activeTab === "Products & Stock") renderInventory();
+      }
+    }
+
+    // 5. Product deleted
+    if(msg.type === "product_deleted"){
+      state.products = state.products.filter(p=>p.id!==msg.product_id);
+      state.cart = state.cart.filter(i=>i.product_id!==msg.product_id);
+      if(state.role === "customer") {
+        const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab || "Shop";
+        if(activeTab === "Shop") renderShop(false);
+      } else if(state.role === "seller") {
+        const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab;
+        if(activeTab === "Products & Stock") renderInventory();
+      }
+    }
+  };
+  state.ws = ws;
+}
+
+function refreshActiveSellerTab(){
+  const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab || "Overview";
+  renderSeller(activeTab);
+}
+
+/* ================= LOGIN & 7-DIGIT ID AUTH ================= */
+async function renderLogin(){
+  const app = document.getElementById("app");
+  const urlParams = new URLSearchParams(window.location.search);
+  let currentRole = urlParams.get("role") === "seller" ? "seller" : "customer";
+
+  // Pre-load default profiles
+  let profiles = {sellers: [], customers: []};
+  try {
+    profiles = await api("/api/auth/quick-profiles");
+  } catch(e){}
+
+  app.innerHTML = `
+  <div class="min-h-screen flex items-center justify-center px-4 py-8">
+    <div class="glass glow-border p-8 sm:p-10 w-full max-w-lg fade-up relative z-20">
+      <div class="text-center mb-6">
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-3 shadow-lg shadow-cyan-500/20" style="background:linear-gradient(135deg,rgba(0,229,255,.2),rgba(124,58,237,.3)); border:1px solid rgba(0,229,255,0.4);">
+          <span class="text-3xl">⚡</span>
+        </div>
+        <h1 class="text-3xl font-bold mb-1 bg-clip-text text-transparent" style="background-image:linear-gradient(120deg,var(--cyan),var(--purple));-webkit-background-clip:text;">OrderFlow AI</h1>
+        <p class="text-xs text-white/60">Multi-Seller Marketplace & Order Management</p>
+      </div>
+
+      <!-- Role Switcher -->
+      <div class="flex justify-center gap-3 mb-6 p-1.5 rounded-full bg-white/5 border border-white/10">
+        <button id="roleCustomerBtn" class="tab flex-1 ${currentRole==='customer'?'active':''}">🛒 Customer</button>
+        <button id="roleSellerBtn" class="tab flex-1 ${currentRole==='seller'?'active':''}">🏪 Seller Hub</button>
+      </div>
+
+      <!-- 7-Digit ID Login Form -->
+      <form id="idLoginForm" class="space-y-4 mb-6">
+        <div>
+          <label class="block text-xs font-semibold text-white/70 mb-1 flex justify-between">
+            <span id="idInputLabel">${currentRole==='seller' ? '7-Digit Seller ID' : '7-Digit Customer ID'}</span>
+            <span class="text-[10px] text-cyan-300 font-mono">Exactly 7 digits</span>
+          </label>
+          <input id="loginIdInput" required type="text" maxlength="7" pattern="[0-9]{7}" placeholder="${currentRole==='seller' ? '1001001' : '7001001'}" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono text-white focus:outline-none focus:border-cyan-400 placeholder-white/30 tracking-wider text-base" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-white/70 mb-1">Password</label>
+          <input id="loginPwInput" required type="password" placeholder="••••••••" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400 placeholder-white/30" />
+        </div>
+
+        <button type="submit" class="btn-neon w-full font-bold py-3 text-sm cursor-pointer shadow-lg hover:scale-[1.01] transition-transform">
+          Sign In with 7-Digit ID →
+        </button>
+      </form>
+
+      <!-- Quick 1-Click Demo Profiles -->
+      <div class="pt-4 border-t border-white/10 mb-4">
+        <p class="text-[11px] uppercase tracking-wider text-white/50 font-bold mb-2.5 flex items-center justify-between">
+          <span>⚡ Instant 1-Click Profile Test:</span>
+          <span class="text-cyan-300 font-mono text-[10px]">Pre-filled credentials</span>
+        </p>
+        <div id="quickProfilesContainer" class="flex flex-col gap-2"></div>
+      </div>
+
+      <!-- Register New Account Link -->
+      <div class="text-center pt-3 border-t border-white/5">
+        <p class="text-xs text-white/50">
+          Don't have a 7-digit ID?
+          <button id="openRegisterModalBtn" class="text-cyan-300 font-semibold hover:underline cursor-pointer ml-1">Register New Account</button>
+        </p>
+      </div>
+    </div>
+  </div>`;
+
+  function updateLoginUi(){
+    const label = document.getElementById("idInputLabel");
+    const input = document.getElementById("loginIdInput");
+    const pw = document.getElementById("loginPwInput");
+    if(currentRole === "seller"){
+      label.textContent = "7-Digit Seller ID";
+      input.placeholder = "1001001";
+      pw.value = "seller123";
+    } else {
+      label.textContent = "7-Digit Customer ID";
+      input.placeholder = "7001001";
+      pw.value = "customer123";
+    }
+
+    // Render quick profile chips
+    const qRoot = document.getElementById("quickProfilesContainer");
+    const list = currentRole === "seller" ? profiles.sellers : profiles.customers;
+    const defaultPw = currentRole === "seller" ? "seller123" : "customer123";
+
+    qRoot.innerHTML = list.map(u=>`
+      <button type="button" class="quick-chip glass px-3.5 py-2.5 rounded-xl text-left flex items-center justify-between hover:border-cyan-400/50 transition-all cursor-pointer text-xs" data-id="${u.id}" data-pw="${defaultPw}">
+        <div class="flex items-center gap-2.5">
+          <span class="text-lg">${currentRole==='seller'?'🏪':'👤'}</span>
+          <div>
+            <p class="font-bold text-white">${u.name}</p>
+            <p class="text-[10px] text-white/40 font-mono">ID: #${u.id}</p>
+          </div>
+        </div>
+        <span class="text-[10px] px-2 py-1 rounded bg-cyan-500/20 text-cyan-300 font-medium">Click to Login</span>
+      </button>
+    `).join("") || '<p class="text-xs text-white/40">Loading profiles...</p>';
+
+    qRoot.querySelectorAll(".quick-chip").forEach(chip=>{
+      chip.onclick = ()=>{
+        document.getElementById("loginIdInput").value = chip.dataset.id;
+        document.getElementById("loginPwInput").value = chip.dataset.pw;
+        performIdLogin(chip.dataset.id, chip.dataset.pw, currentRole);
+      };
+    });
+  }
+
+  document.getElementById("roleCustomerBtn").onclick = ()=>{
+    currentRole="customer";
+    document.getElementById("roleCustomerBtn").classList.add("active");
+    document.getElementById("roleSellerBtn").classList.remove("active");
+    updateLoginUi();
+  };
+  document.getElementById("roleSellerBtn").onclick = ()=>{
+    currentRole="seller";
+    document.getElementById("roleSellerBtn").classList.add("active");
+    document.getElementById("roleCustomerBtn").classList.remove("active");
+    updateLoginUi();
+  };
+
+  document.getElementById("idLoginForm").onsubmit = (e)=>{
+    e.preventDefault();
+    const id = document.getElementById("loginIdInput").value.trim();
+    const pw = document.getElementById("loginPwInput").value;
+    performIdLogin(id, pw, currentRole);
+  };
+
+  document.getElementById("openRegisterModalBtn").onclick = ()=> openRegisterModal(currentRole);
+
+  updateLoginUi();
+
+  // If URL specifies role and auto, automatically sign in as first default
+  if(urlParams.get("auto") === "true"){
+    const defaultId = currentRole === "seller" ? "1001001" : "7001001";
+    const defaultPw = currentRole === "seller" ? "seller123" : "customer123";
+    performIdLogin(defaultId, defaultPw, currentRole);
+  }
+}
+
+async function performIdLogin(id, password, role){
+  try {
+    const data = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ id, password, role })
+    });
+    state.token = data.access_token;
+    state.user = data.user;
+    state.role = role;
+    toast(`Welcome, ${data.user.name} (#${data.user.id})!`, "success");
+    connectWebSocket();
+    if(role === "customer") await enterCustomer(); else await enterSeller();
+  } catch(e) {
+    toast(e.message, "error");
+  }
+}
+
+/* ================= REGISTRATION MODAL ================= */
+function openRegisterModal(role){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-8 w-full max-w-md pop-in bg-[#070b22]/95 relative z-50">
+        <div class="flex justify-between items-center mb-5">
+          <div>
+            <h3 class="text-xl font-bold text-white">Create New ${role==='seller'?'Seller Store':'Customer Account'}</h3>
+            <p class="text-xs text-white/50">Your 7-digit ID will be generated automatically</p>
+          </div>
+          <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+        </div>
+
+        <form id="registerForm" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-white/70 mb-1">${role==='seller'?'Store / Business Name':'Your Full Name'}</label>
+            <input id="regName" required type="text" placeholder="${role==='seller'?'e.g. Apex Tech Store':'e.g. John Doe'}" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/70 mb-1">Email (Optional)</label>
+            <input id="regEmail" type="email" placeholder="email@example.com" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/70 mb-1">Set Password</label>
+            <input id="regPassword" required type="password" minlength="4" placeholder="At least 4 characters" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div class="pt-3 flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="btn-neon text-xs font-bold px-5 py-2.5 cursor-pointer">Generate 7-Digit ID & Join</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("registerForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const name = document.getElementById("regName").value;
+    const email = document.getElementById("regEmail").value;
+    const password = document.getElementById("regPassword").value;
+
+    try{
+      const data = await api("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ name, email, password, role })
+      });
+      closeModal();
+      alert(`🎉 Registration Successful!\n\nYour 7-Digit ${role.toUpperCase()} ID is: ${data.generated_id}\n\nPlease note this ID to log in anytime!`);
+      state.token = data.access_token;
+      state.user = data.user;
+      state.role = role;
+      toast(`Signed in as ${data.user.name} (#${data.user.id})`, "success");
+      connectWebSocket();
+      if(role === "customer") await enterCustomer(); else await enterSeller(true); // pass true for new store onboarding
+    }catch(err){ toast(err.message, "error"); }
+  };
+}
+
+/* ================= SHARED NAV ================= */
+function navBar(tabs, activeTab, onSwitch){
+  const otherRole = state.role === "customer" ? "seller" : "customer";
+  const otherRoleLabel = state.role === "customer" ? "🏪 Open Seller Hub" : "🛒 Open Customer View";
+  return `
+  <div class="sticky top-0 z-30 px-4 pt-4 pb-3">
+    <div class="glass flex items-center justify-between px-5 py-3 max-w-7xl mx-auto gap-4 flex-wrap">
+      <div class="flex items-center gap-2.5 font-semibold display">
+        <span class="text-cyan-400 text-lg">⚡</span>
+        <span class="text-white">OrderFlow AI</span>
+        <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${state.role==='seller'?'bg-purple-500/20 text-purple-300 border border-purple-500/30':'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'}">
+          ${state.role === 'seller' ? `STORE: ${state.user.name} (#${state.user.id})` : `CUSTOMER: ${state.user.name} (#${state.user.id})`}
+        </span>
+      </div>
+      <div class="flex gap-2 overflow-x-auto scrollbar-thin">
+        ${tabs.map(t=>`<button class="tab ${t===activeTab?'active':''}" data-tab="${t}">${t}</button>`).join("")}
+      </div>
+      <div class="flex items-center gap-3">
+        ${state.role === 'seller' ? `
+          <button id="soundToggleBtn" class="text-xs px-2.5 py-1.5 rounded-xl border ${state.soundEnabled?'bg-emerald-500/10 text-emerald-300 border-emerald-500/30':'bg-white/5 text-white/40 border-white/10'} transition-all cursor-pointer flex items-center gap-1.5">
+            <span>${state.soundEnabled ? '🔔 Chime: ON' : '🔕 Chime: OFF'}</span>
+          </button>
+        ` : ''}
+        <button id="openOtherRoleBtn" class="text-xs px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:shadow-cyan-500/20" title="Open in another window for live sync testing">
+          <span>${otherRoleLabel}</span>
+          <span class="text-[10px] text-white/50">↗</span>
+        </button>
+        <img src="${state.user.picture||'https://api.dicebear.com/7.x/identicon/svg?seed='+state.user.name}" class="w-8 h-8 rounded-full border border-white/20 object-cover" />
+        <button id="logoutBtn" class="text-xs text-white/40 hover:text-white/80 cursor-pointer">Sign out</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function wireNav(onSwitch){
+  document.querySelectorAll("[data-tab]").forEach(btn=>{
+    btn.onclick = ()=> onSwitch(btn.dataset.tab);
+  });
+  const openOther = document.getElementById("openOtherRoleBtn");
+  if(openOther){
+    openOther.onclick = ()=>{
+      const otherRole = state.role === "customer" ? "seller" : "customer";
+      window.open(window.location.origin + window.location.pathname + `?role=${otherRole}`, "_blank");
+    };
+  }
+  const soundBtn = document.getElementById("soundToggleBtn");
+  if(soundBtn){
+    soundBtn.onclick = ()=>{
+      state.soundEnabled = !state.soundEnabled;
+      toast(`Order Chime ${state.soundEnabled ? 'Enabled 🔔' : 'Muted 🔕'}`);
+      if(state.soundEnabled) playOrderChime();
+      const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab || "Overview";
+      renderSeller(activeTab);
+    };
+  }
+  document.getElementById("logoutBtn").onclick = ()=>{
+    if(state.ws) state.ws.close();
+    Object.assign(state, {token:null,user:null,role:null,products:[],cart:[],orders:[],ws:null});
+    if(window.history.replaceState) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    renderLogin();
+  };
+}
+
+/* ================= CUSTOMER VIEW ================= */
+async function enterCustomer(){
+  state.products = await api("/api/products");
+  state.orders = await api("/api/orders");
+  renderCustomer();
+}
+
+function renderCustomer(tab="Shop"){
+  const app = document.getElementById("app");
+  app.innerHTML = navBar(["Shop","My Orders"], tab, (t)=>renderCustomer(t)) + `<div id="customerBody" class="max-w-7xl mx-auto px-4 pb-16"></div>`;
+  wireNav((t)=>renderCustomer(t));
+  if(tab==="Shop") renderShop(); else renderCustomerOrders();
+}
+
+function renderShop(resetDrawer=true){
+  const body = document.getElementById("customerBody");
+  if(!body) return;
+
+  const totalCartCount = state.cart.reduce((s,i)=>s+i.qty,0);
+  const activeOrdersCount = state.orders.filter(o=>o.status!=="Completed"&&o.status!=="Cancelled").length;
+
+  // Extract unique seller names for filtering
+  const sellerList = Array.from(new Set(state.products.map(p=>p.seller_name || "Verified Seller")));
+
+  let displayedProducts = state.products;
+  if(state.shopSellerFilter !== "all"){
+    displayedProducts = state.products.filter(p=>(p.seller_name||"Verified Seller") === state.shopSellerFilter);
+  }
+
+  body.innerHTML = `
+    <div class="glass glow-border p-6 mb-6 fade-up">
+      <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+        <div>
+          <h2 class="text-xl font-semibold text-white">Welcome back, ${state.user.name} 👋 <span class="text-xs text-white/40 font-mono">(ID: #${state.user.id})</span></h2>
+          <p class="text-white/50 text-sm mt-1">${totalCartCount} item(s) in cart · ${activeOrdersCount} active order(s) · Multi-Seller Flipkart Marketplace</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> Live Marketplace Sync Active
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Store Filter Tabs -->
+    <div class="flex items-center justify-between gap-4 mb-4 flex-wrap">
+      <div class="flex items-center gap-2 overflow-x-auto scrollbar-thin">
+        <span class="text-xs font-bold text-white/50 uppercase tracking-wider mr-1">Filter Store:</span>
+        <button class="px-3 py-1 rounded-full text-xs font-medium cursor-pointer transition-all border ${state.shopSellerFilter==='all'?'bg-cyan-500/20 text-cyan-300 border-cyan-400':'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'}" onclick="filterShopBySeller('all')">All Stores (${state.products.length})</button>
+        ${sellerList.map(sname=>`
+          <button class="px-3 py-1 rounded-full text-xs font-medium cursor-pointer transition-all border ${state.shopSellerFilter===sname?'bg-cyan-500/20 text-cyan-300 border-cyan-400':'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'}" onclick="filterShopBySeller('${sname}')">🏪 ${sname}</button>
+        `).join("")}
+      </div>
+
+      <button id="cartBtn" class="btn-neon text-sm flex items-center gap-2 cursor-pointer ml-auto">
+        <span>🛒 View Cart</span>
+        <span class="px-2 py-0.5 rounded-full bg-white/20 text-xs font-bold">${totalCartCount}</span>
+      </button>
+    </div>
+
+    <!-- Product Grid -->
+    <div id="productGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"></div>
+    <div id="cartDrawer" class="fixed top-0 right-0 h-full w-full sm:w-96 translate-x-full transition-transform duration-300 z-40 p-4"></div>
+  `;
+
+  const grid = document.getElementById("productGrid");
+  displayedProducts.forEach((p,i)=>{
+    const card = document.createElement("div");
+    card.className = "glass p-5 fade-up hover:border-cyan-400/40 transition-all flex flex-col justify-between";
+    card.style.animationDelay = (i*0.04)+"s";
+
+    const isOutOfStock = p.stock <= 0;
+    const isLowStock = p.stock > 0 && p.stock <= 5;
+    const stockBadge = isOutOfStock
+      ? `<span class="text-xs px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30 font-semibold">Out of stock</span>`
+      : isLowStock
+      ? `<span class="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse font-semibold">Only ${p.stock} left! 🔥</span>`
+      : `<span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">${p.stock} in stock</span>`;
+
+    card.innerHTML = `
+      <div>
+        <div class="h-28 rounded-2xl mb-3 flex items-center justify-center text-4xl shadow-inner transition-transform duration-300 hover:scale-105" style="background:linear-gradient(135deg,rgba(0,229,255,.15),rgba(124,58,237,.2)); border:1px solid rgba(255,255,255,0.06);">
+          ${p.icon || '📦'}
+        </div>
+        <div class="flex justify-between items-start gap-2">
+          <h4 class="font-medium text-sm text-white">${p.name}</h4>
+          <div class="shrink-0">${stockBadge}</div>
+        </div>
+        <div class="flex items-center gap-1.5 text-xs text-cyan-300/80 mt-1.5 font-medium">
+          <span>🏪</span>
+          <span>Sold by: <strong>${p.seller_name || 'Verified Seller'}</strong></span>
+          <span class="text-[10px] text-white/40 font-mono">(#${p.seller_id})</span>
+        </div>
+        <p class="text-xs text-white/40 mt-1">${p.category}</p>
+      </div>
+      <div class="flex justify-between items-center mt-4 pt-3 border-t border-white/5">
+        <span class="text-cyan-300 font-bold text-base">₹${p.price.toLocaleString()}</span>
+        <button class="btn-neon text-xs add-btn cursor-pointer font-medium ${isOutOfStock?'opacity-40 cursor-not-allowed pointer-events-none':''}">
+          ${isOutOfStock ? 'Out of Stock' : 'Add to Cart'}
+        </button>
+      </div>`;
+
+    if(!isOutOfStock){
+      card.querySelector(".add-btn").onclick = ()=>{
+        const inCart = state.cart.find(i=>i.product_id===p.id);
+        const currentQty = inCart ? inCart.qty : 0;
+        if(currentQty >= p.stock){
+          toast(`Cannot add more: only ${p.stock} available in stock!`, "warning");
+          return;
+        }
+        if(inCart){
+          inCart.qty += 1;
+        } else {
+          state.cart.push({
+            product_id: p.id,
+            name: p.name,
+            price: p.price,
+            qty: 1,
+            icon: p.icon || '📦',
+            seller_id: p.seller_id,
+            seller_name: p.seller_name || 'Verified Seller'
+          });
+        }
+        toast(`Added ${p.name} to cart`, "success");
+        renderShop(false);
+      };
+    }
+    grid.appendChild(card);
+  });
+
+  document.getElementById("cartBtn").onclick = openCart;
+  if(!resetDrawer && document.getElementById("cartDrawer").dataset.open === "true") {
+    openCart();
+  }
+}
+
+function filterShopBySeller(sellerName){
+  state.shopSellerFilter = sellerName;
+  renderShop();
+}
+
+function openCart(){
+  const drawer = document.getElementById("cartDrawer");
+  drawer.dataset.open = "true";
+  const total = state.cart.reduce((s,i)=>s+i.price*i.qty,0);
+
+  // Group items by seller in the cart
+  const sellersInCart = Array.from(new Set(state.cart.map(i=>i.seller_name || 'Verified Seller')));
+
+  drawer.innerHTML = `
+    <div class="glass glow-border h-full p-6 flex flex-col pop-in bg-[#070b22]/95">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-semibold text-base flex items-center gap-2">
+          <span>🛒 Your Shopping Cart</span>
+          <span class="text-xs text-cyan-300">(${state.cart.length})</span>
+        </h3>
+        <button id="closeCart" class="text-white/50 hover:text-white cursor-pointer p-1">✕</button>
+      </div>
+
+      ${sellersInCart.length > 1 ? `
+        <div class="mb-3 p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-[11px] text-purple-300">
+          ⚡ <strong>Multi-Seller Cart:</strong> Items from ${sellersInCart.length} different sellers will be split into individual seller orders upon checkout.
+        </div>
+      ` : ''}
+
+      <div class="flex-1 overflow-y-auto scrollbar-thin space-y-3">
+        ${state.cart.length===0 ? '<p class="text-white/40 text-sm text-center py-10">Your cart is empty.</p>' : state.cart.map((i,idx)=>{
+          const prod = state.products.find(p=>p.id===i.product_id);
+          const maxStock = prod ? prod.stock : i.qty;
+          return `
+          <div class="glass p-3 flex justify-between items-center gap-3">
+            <div class="flex items-center gap-3">
+              <span class="text-2xl">${i.icon || '📦'}</span>
+              <div>
+                <p class="text-sm font-medium text-white">${i.name}</p>
+                <p class="text-[11px] text-cyan-300/80">🏪 ${i.seller_name}</p>
+                <p class="text-xs text-white/40">₹${i.price.toLocaleString()} each · Max: ${maxStock}</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="w-6 h-6 rounded bg-white/10 hover:bg-white/20 text-xs font-bold cursor-pointer" data-qty-dec="${idx}">-</button>
+              <span class="text-xs font-bold text-cyan-300 min-w-[14px] text-center">${i.qty}</span>
+              <button class="w-6 h-6 rounded bg-white/10 hover:bg-white/20 text-xs font-bold cursor-pointer" data-qty-inc="${idx}">+</button>
+              <button class="text-red-400 hover:text-red-300 text-xs ml-1 cursor-pointer" data-remove="${idx}">✕</button>
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+      <div class="pt-4 border-t border-white/10 mt-4">
+        <div class="flex justify-between text-sm mb-3">
+          <span>Subtotal</span>
+          <span class="text-cyan-300 font-bold text-lg">₹${total.toLocaleString()}</span>
+        </div>
+        <button id="checkoutBtn" class="btn-neon w-full pulse cursor-pointer font-bold py-3 flex items-center justify-center gap-2" ${state.cart.length===0?'disabled style="opacity:.4;pointer-events:none"':''}>
+          <span>Place Order Now</span>
+          <span class="text-xs">⚡</span>
+        </button>
+      </div>
+    </div>`;
+
+  drawer.style.transform = "translateX(0)";
+  document.getElementById("closeCart").onclick = ()=>{
+    drawer.dataset.open = "false";
+    drawer.style.transform = "translateX(100%)";
+  };
+
+  drawer.querySelectorAll("[data-qty-dec]").forEach(btn=>{
+    btn.onclick = ()=>{
+      const idx = +btn.dataset.qtyDec;
+      if(state.cart[idx].qty > 1){
+        state.cart[idx].qty -= 1;
+      } else {
+        state.cart.splice(idx,1);
+      }
+      openCart();
+    };
+  });
+
+  drawer.querySelectorAll("[data-qty-inc]").forEach(btn=>{
+    btn.onclick = ()=>{
+      const idx = +btn.dataset.qtyInc;
+      const item = state.cart[idx];
+      const prod = state.products.find(p=>p.id===item.product_id);
+      if(prod && item.qty >= prod.stock){
+        toast(`Cannot add more: only ${prod.stock} left in stock!`, "warning");
+        return;
+      }
+      item.qty += 1;
+      openCart();
+    };
+  });
+
+  drawer.querySelectorAll("[data-remove]").forEach(btn=>{
+    btn.onclick = ()=>{ state.cart.splice(+btn.dataset.remove,1); openCart(); };
+  });
+
+  const co = document.getElementById("checkoutBtn");
+  if(co) co.onclick = placeOrder;
+}
+
+async function placeOrder(){
+  try{
+    const res = await api("/api/orders", {
+      method:"POST",
+      body: JSON.stringify({
+        items: state.cart.map(i=>({product_id: i.product_id, name: i.name, price: i.price, qty: i.qty}))
+      })
+    });
+    // Add created orders
+    if(res.orders){
+      res.orders.forEach(o=> state.orders.unshift(o));
+    } else if(res.order){
+      state.orders.unshift(res.order);
+    }
+    state.cart = [];
+    toast(res.message || "Order placed successfully!", "success");
+    renderCustomer("My Orders");
+  }catch(e){
+    toast("Order failed: " + e.message, "error");
+  }
+}
+
+function renderCustomerOrders(){
+  const body = document.getElementById("customerBody");
+  if(!body) return;
+  const stages = ["Placed","Processing","Completed"];
+
+  body.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-lg font-semibold">My Orders (${state.orders.length})</h3>
+      <button onclick="renderCustomer('Shop')" class="text-xs text-cyan-300 hover:underline cursor-pointer">← Back to Shop</button>
+    </div>
+    <div class="space-y-5">
+    ${state.orders.length===0 ? '<div class="glass p-10 text-center text-white/40 text-sm">No orders yet. Start shopping!</div>' : state.orders.map(o=>{
+      const cancelled = o.status==="Cancelled";
+      const delayed = o.status==="Delayed";
+      const stepIdx = cancelled ? -1 : (delayed ? 1 : stages.indexOf(o.status));
+
+      return `
+      <div class="glass p-5 fade-up ${delayed ? 'border-amber-400/50 shadow-amber-500/10' : cancelled ? 'border-red-500/40' : ''}">
+        <div class="flex justify-between items-start mb-3 gap-3 flex-wrap">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="font-bold text-base text-white">Order #${o.id}</span>
+              ${statusBadge(o.status)}
+            </div>
+            <p class="text-xs text-cyan-300/80 mt-1 font-medium">🏪 Store: <strong>${o.seller_name || 'Verified Seller'}</strong> (#${o.seller_id})</p>
+            <p class="text-xs text-white/60 mt-1">${o.items.map(i=>`${i.name} ×${i.qty}`).join(", ")}</p>
+          </div>
+          <div class="text-right">
+            <p class="text-cyan-300 font-bold text-lg">₹${o.amount.toLocaleString()}</p>
+            <p class="text-xs text-white/40">ETA: <span class="text-white font-medium">${o.eta}</span></p>
+          </div>
+        </div>
+
+        ${delayed ? `
+          <div class="my-3 px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs flex items-center justify-between animate-pulse">
+            <div class="flex items-center gap-2">
+              <span class="text-base">⚠️</span>
+              <span><strong>Delayed by ${o.seller_name}:</strong> ${o.delay_reason || 'Logistics delay'} (New ETA: ${o.eta})</span>
+            </div>
+          </div>
+        ` : ''}
+
+        ${cancelled ? `
+          <div class="my-3 px-3 py-2 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+            <span>✕</span> <span>Order Cancelled · Inventory refunded to catalog.</span>
+          </div>
+        ` : `
+          <div class="flex items-center gap-2 mt-4">
+            ${stages.map((s,i)=>`
+              <div class="flex items-center gap-2 flex-1">
+                <div class="timeline-dot ${i<=stepIdx ? (delayed && i===1 ? 'text-amber-400 bg-amber-400' : 'text-cyan-400 bg-cyan-400') : 'text-white/20 bg-white/20'}"></div>
+                ${i<stages.length-1?`<div class="timeline-line"><div class="timeline-fill" style="width:${i<stepIdx?100:0}%"></div></div>`:''}
+              </div>`).join("")}
+          </div>
+          <div class="flex justify-between text-xs text-white/40 mt-1.5 font-medium">
+            ${stages.map(s=>`<span>${s}</span>`).join("")}
+          </div>
+        `}
+
+        ${o.status === "Placed" ? `
+          <div class="mt-4 pt-3 border-t border-white/5 flex justify-end">
+            <button class="text-xs text-red-400 hover:text-red-300 cursor-pointer" onclick="customerCancelOrder('${o.id}')">Cancel Order</button>
+          </div>
+        ` : ''}
+      </div>`;
+    }).join("")}
+    </div>`;
+}
+
+async function customerCancelOrder(orderId){
+  if(!confirm("Are you sure you want to cancel this order? The stock will be returned.")) return;
+  try{
+    await api(`/api/orders/${orderId}/status`, {method:"PATCH", body: JSON.stringify({status: "Cancelled"})});
+    toast(`Order #${orderId} cancelled`, "info");
+    const idx = state.orders.findIndex(o=>o.id===orderId);
+    if(idx>-1) state.orders[idx].status = "Cancelled";
+    renderCustomerOrders();
+  }catch(e){ toast("Cancellation failed: " + e.message, "error"); }
+}
+
+/* ================= SELLER VIEW ================= */
+async function enterSeller(isNewStore=false){
+  state.orders = await api("/api/orders");
+  state.products = await api(`/api/products?seller_id=${state.user.id}`);
+  renderSeller("Overview", isNewStore);
+}
+
+async function renderSeller(tab="Overview", isNewStore=false){
+  const app = document.getElementById("app");
+  app.innerHTML = navBar(["Overview","Live Orders","Products & Stock","Kanban"], tab, (t)=>renderSeller(t)) + `<div id="sellerBody" class="max-w-7xl mx-auto px-4 pb-16"></div>`;
+  wireNav((t)=>renderSeller(t));
+
+  if(tab==="Overview") await renderSellerOverview(isNewStore);
+  else if(tab==="Live Orders") renderSellerOrders();
+  else if(tab==="Products & Stock") renderInventory();
+  else renderKanban();
+}
+
+/* ---------- TAB 1: OVERVIEW & MONTHLY EARNINGS ---------- */
+async function renderSellerOverview(isNewStore=false){
+  const body = document.getElementById("sellerBody");
+  if(!body) return;
+
+  try {
+    state.analytics = await api("/api/analytics/seller");
+  } catch(e) {
+    console.error("Analytics fetch error:", e);
+  }
+
+  let customerStats = {total_unique_customers: 0, customers: []};
+  try {
+    customerStats = await api("/api/analytics/customers");
+  } catch(e){}
+
+  const an = state.analytics || {
+    current_month_name: "This Month",
+    this_month_revenue: 0,
+    this_month_orders: 0,
+    this_month_completed: 0,
+    this_month_aov: 0,
+    fulfillment_rate: 100,
+    total_revenue: 0,
+    pending_count: 0,
+    completed_count: 0,
+    cancelled_count: 0,
+    delayed_count: 0,
+    daily_breakdown: []
+  };
+
+  body.innerHTML = `
+    ${state.products.length === 0 || isNewStore ? `
+      <!-- New Seller Welcome Onboarding Banner -->
+      <div class="glass glow-border p-6 mb-6 fade-up bg-gradient-to-r from-purple-950/60 to-cyan-950/60 border-cyan-400/50">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <span class="text-xs uppercase font-extrabold tracking-widest text-cyan-400">🎉 Brand New Seller Store Ready</span>
+            <h2 class="text-2xl font-bold mt-1 text-white">Welcome, ${state.user.name}! (Seller ID: #${state.user.id})</h2>
+            <p class="text-sm text-white/70 mt-1">Your store is online. Start by listing your first product so customers can discover your catalog!</p>
+          </div>
+          <button onclick="openAddProductModal()" class="btn-neon text-sm font-bold px-6 py-3 cursor-pointer shadow-xl hover:scale-105 transition-transform flex items-center gap-2">
+            <span>➕ Add Your First Product Now</span>
+          </button>
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- Top Live Notification Bar -->
+    <div class="glass glow-border p-5 mb-6 fade-up flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+          <span class="text-xs uppercase font-bold tracking-widest text-emerald-400">Flipkart-Grade Store Hub · ${state.user.name}</span>
+        </div>
+        <h2 class="text-2xl font-bold mt-1 text-white">Store Ledger & Performance</h2>
+        <p class="text-white/40 text-xs">Orders routed exclusively to Seller #${state.user.id} · Independent Stock & Revenue</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <button onclick="openAddProductModal()" class="btn-neon text-xs font-semibold flex items-center gap-1.5 cursor-pointer">
+          <span>➕ Add Product</span>
+        </button>
+        <button onclick="renderSeller('Live Orders')" class="text-xs px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 cursor-pointer">
+          <span>View Live Orders (${an.pending_count})</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Monthly Earnings & Key KPI Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="glass p-5 fade-up border-cyan-500/40 relative overflow-hidden" style="animation-delay:0.05s">
+        <div class="absolute -right-4 -bottom-4 text-7xl opacity-5">💰</div>
+        <p class="text-xs font-medium text-cyan-300 mb-1 uppercase tracking-wider">This Month's Revenue</p>
+        <p class="text-3xl font-extrabold text-white counter" data-target="${an.this_month_revenue}" data-prefix="₹">₹0</p>
+        <p class="text-[11px] text-white/50 mt-2">${an.this_month_orders} store orders · ₹${an.this_month_aov} AOV</p>
+      </div>
+
+      <div class="glass p-5 fade-up border-purple-500/40 relative overflow-hidden" style="animation-delay:0.1s">
+        <div class="absolute -right-4 -bottom-4 text-7xl opacity-5">📦</div>
+        <p class="text-xs font-medium text-purple-300 mb-1 uppercase tracking-wider">Pending Orders</p>
+        <p class="text-3xl font-extrabold text-white counter" data-target="${an.pending_count}">0</p>
+        <p class="text-[11px] text-white/50 mt-2">${an.delayed_count} delayed · Live dispatch active</p>
+      </div>
+
+      <div class="glass p-5 fade-up border-emerald-500/40 relative overflow-hidden" style="animation-delay:0.15s">
+        <div class="absolute -right-4 -bottom-4 text-7xl opacity-5">✓</div>
+        <p class="text-xs font-medium text-emerald-300 mb-1 uppercase tracking-wider">Fulfillment Rate</p>
+        <p class="text-3xl font-extrabold text-white counter" data-target="${an.fulfillment_rate}" data-suffix="%">0%</p>
+        <p class="text-[11px] text-white/50 mt-2">${an.completed_count} fulfilled · ${an.cancelled_count} cancelled</p>
+      </div>
+
+      <div class="glass p-5 fade-up border-pink-500/40 relative overflow-hidden" style="animation-delay:0.2s">
+        <div class="absolute -right-4 -bottom-4 text-7xl opacity-5">👥</div>
+        <p class="text-xs font-medium text-pink-300 mb-1 uppercase tracking-wider">Unique Customers</p>
+        <p class="text-3xl font-extrabold text-white counter" data-target="${customerStats.total_unique_customers}">0</p>
+        <p class="text-[11px] text-white/50 mt-2">₹${an.total_revenue.toLocaleString()} all-time store sales</p>
+      </div>
+    </div>
+
+    <!-- Daily Revenue Chart & Top Customers -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      <div class="glass p-6 fade-up lg:col-span-2">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h3 class="text-base font-semibold text-white">Daily Revenue Volume (${an.current_month_name})</h3>
+            <p class="text-xs text-white/40">Sales revenue velocity for ${state.user.name}</p>
+          </div>
+          <span class="text-xs px-3 py-1 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">Monthly Breakdown</span>
+        </div>
+        <div class="space-y-2">
+          ${an.daily_breakdown.length === 0 ? '<p class="text-white/40 text-xs py-4 text-center">No orders recorded yet this month for this store.</p>' :
+            an.daily_breakdown.map(d=>{
+              const maxVal = Math.max(...an.daily_breakdown.map(x=>x.amount), 1);
+              const pct = Math.min(100, Math.max(8, (d.amount / maxVal) * 100));
+              return `
+              <div class="flex items-center gap-3 text-xs">
+                <span class="w-24 text-white/60 font-mono">${d.date}</span>
+                <div class="flex-1 bg-white/5 rounded-full h-4 overflow-hidden relative">
+                  <div class="h-full rounded-full transition-all duration-700" style="width:${pct}%; background:linear-gradient(90deg,var(--cyan),var(--purple));"></div>
+                </div>
+                <span class="w-24 text-right font-bold text-cyan-300">₹${d.amount.toLocaleString()}</span>
+              </div>`;
+            }).join("")}
+        </div>
+      </div>
+
+      <!-- Customer Breakdown -->
+      <div class="glass p-6 fade-up">
+        <h3 class="text-base font-semibold text-white mb-1">Customer Insights</h3>
+        <p class="text-xs text-white/40 mb-4">Repeat buyers for your store</p>
+        <div class="space-y-3">
+          ${customerStats.customers.length === 0 ? '<p class="text-xs text-white/40 text-center py-6">No customer orders yet</p>' :
+            customerStats.customers.slice(0, 5).map(c=>`
+              <div class="flex justify-between items-center text-xs p-2 rounded-xl bg-white/5 border border-white/5">
+                <div>
+                  <p class="font-bold text-white">${c.name}</p>
+                  <p class="text-[10px] text-white/40 font-mono">ID: #${c.id} · ${c.orders_count} orders</p>
+                </div>
+                <span class="font-bold text-cyan-300">₹${c.total_spent.toLocaleString()}</span>
+              </div>
+            `).join("")}
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Live Activity Stream -->
+    <div class="glass p-6 fade-up">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-base font-semibold text-white">Recent Orders for ${state.user.name}</h3>
+        <button onclick="renderSeller('Live Orders')" class="text-xs text-cyan-300 hover:underline cursor-pointer">Manage All Store Orders →</button>
+      </div>
+      <div class="space-y-2.5">
+        ${state.orders.slice(0, 5).map(o=>`
+          <div class="glass px-4 py-3 flex justify-between items-center text-sm fade-up hover:border-cyan-400/40 transition-all">
+            <div class="flex items-center gap-3">
+              <span class="font-bold text-white">#${o.id}</span>
+              <span class="text-xs text-white/60">${o.customer_name}</span>
+              <span class="text-xs text-white/40 hidden sm:inline">(${o.items.map(i=>i.name+' ×'+i.qty).join(', ')})</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="font-bold text-cyan-300">₹${o.amount.toLocaleString()}</span>
+              ${statusBadge(o.status)}
+            </div>
+          </div>
+        `).join("") || '<p class="text-white/40 text-xs py-4 text-center">No orders placed yet with this store.</p>'}
+      </div>
+    </div>
+  `;
+
+  document.querySelectorAll(".counter").forEach(el=> countUp(el, +el.dataset.target, el.dataset.prefix||"", el.dataset.suffix||""));
+}
+
+/* ---------- TAB 2: LIVE ORDERS (SPECIFIC TO THIS SELLER) ---------- */
+function renderSellerOrders(){
+  const body = document.getElementById("sellerBody");
+  if(!body) return;
+
+  let filtered = state.orders.slice();
+  if(state.sellerOrderFilter !== "All"){
+    filtered = filtered.filter(o=>o.status === state.sellerOrderFilter);
+  }
+  if(state.sellerSearch.trim()){
+    const term = state.sellerSearch.toLowerCase();
+    filtered = filtered.filter(o=>
+      o.id.toLowerCase().includes(term) ||
+      o.customer_name.toLowerCase().includes(term) ||
+      o.items.some(i=>i.name.toLowerCase().includes(term))
+    );
+  }
+
+  // Sorting
+  if(state.sellerSort === "highest"){
+    filtered.sort((a,b)=>b.amount - a.amount);
+  } else if(state.sellerSort === "lowest"){
+    filtered.sort((a,b)=>a.amount - b.amount);
+  } else if(state.sellerSort === "oldest"){
+    filtered.sort((a,b)=>a.created_at.localeCompare(b.created_at));
+  } else {
+    filtered.sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  }
+
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / state.sellerPageSize));
+  if(state.sellerPage > totalPages) state.sellerPage = totalPages;
+  const startIdx = (state.sellerPage - 1) * state.sellerPageSize;
+  const pageOrders = filtered.slice(startIdx, startIdx + state.sellerPageSize);
+
+  const counts = {
+    All: state.orders.length,
+    Placed: state.orders.filter(o=>o.status==="Placed").length,
+    Processing: state.orders.filter(o=>o.status==="Processing").length,
+    Delayed: state.orders.filter(o=>o.status==="Delayed").length,
+    Completed: state.orders.filter(o=>o.status==="Completed").length,
+    Cancelled: state.orders.filter(o=>o.status==="Cancelled").length,
+  };
+
+  body.innerHTML = `
+    <div class="glass p-5 mb-5 fade-up">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+        <div>
+          <h3 class="text-xl font-bold text-white flex items-center gap-2">
+            <span>Store Orders · ${state.user.name}</span>
+            <span class="text-xs text-emerald-300 pulse px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 font-mono">● LIVE</span>
+          </h3>
+          <p class="text-xs text-white/50 mt-0.5">Showing orders routed specifically to Seller ID #${state.user.id}</p>
+        </div>
+
+        <div class="flex items-center gap-3 w-full md:w-auto">
+          <div class="relative flex-1 md:w-64">
+            <input id="sellerSearchInput" type="text" placeholder="Search ID, customer, item..." value="${state.sellerSearch}" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-cyan-400" />
+            ${state.sellerSearch ? `<button id="clearSearchBtn" class="absolute right-2.5 top-1.5 text-xs text-white/40 hover:text-white cursor-pointer">✕</button>` : ''}
+          </div>
+
+          <select id="sellerSortSelect" class="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400 cursor-pointer">
+            <option value="newest" class="bg-[#050816]" ${state.sellerSort==='newest'?'selected':''}>Newest First</option>
+            <option value="oldest" class="bg-[#050816]" ${state.sellerSort==='oldest'?'selected':''}>Oldest First</option>
+            <option value="highest" class="bg-[#050816]" ${state.sellerSort==='highest'?'selected':''}>Highest Amount</option>
+            <option value="lowest" class="bg-[#050816]" ${state.sellerSort==='lowest'?'selected':''}>Lowest Amount</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Filter Chips -->
+      <div class="flex gap-2 overflow-x-auto scrollbar-thin pb-1">
+        ${["All","Placed","Processing","Delayed","Completed","Cancelled"].map(st=>`
+          <button class="px-3 py-1 rounded-full text-xs font-medium cursor-pointer transition-all border shrink-0 ${state.sellerOrderFilter===st ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400' : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'}" data-filter="${st}">
+            ${st} <span class="ml-1 opacity-60 text-[10px]">(${counts[st]||0})</span>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+
+    <!-- Orders Table -->
+    <div class="glass overflow-x-auto scrollbar-thin mb-4">
+      <table class="w-full text-sm">
+        <thead class="text-white/40 text-left border-b border-white/10 text-xs uppercase tracking-wider">
+          <tr>
+            <th class="p-4">Order ID & Date</th>
+            <th class="p-4">Customer</th>
+            <th class="p-4">Items</th>
+            <th class="p-4">Amount</th>
+            <th class="p-4">Status</th>
+            <th class="p-4">ETA / Delay</th>
+            <th class="p-4 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="ordersTbody">
+          ${pageOrders.map(o=>`
+            <tr class="border-t border-white/5 fade-up hover:bg-white/[0.02] transition-colors">
+              <td class="p-4 font-mono font-semibold text-white">#${o.id}<br><span class="text-[10px] text-white/40 font-sans">${o.created_at.replace("T"," ").slice(0,16)}</span></td>
+              <td class="p-4 font-medium text-white">${o.customer_name}</td>
+              <td class="p-4 text-xs text-white/70 max-w-xs">${o.items.map(i=>`${i.name} (x${i.qty})`).join(', ')}</td>
+              <td class="p-4 font-bold text-cyan-300">₹${o.amount.toLocaleString()}</td>
+              <td class="p-4">${statusBadge(o.status)}</td>
+              <td class="p-4 text-xs">
+                <span class="font-mono text-white">${o.eta}</span>
+                ${o.delay_reason ? `<br><span class="text-[10px] text-amber-300">⚠️ ${o.delay_reason}</span>` : ''}
+              </td>
+              <td class="p-4 text-right">
+                <div class="flex items-center justify-end gap-1.5 flex-wrap">
+                  ${sellerActionButtons(o)}
+                </div>
+              </td>
+            </tr>
+          `).join("") || `<tr><td class="p-8 text-center text-white/40 text-xs" colspan="7">No matching orders found for this store.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="flex justify-between items-center text-xs text-white/50 px-2">
+      <span>Showing ${total > 0 ? startIdx + 1 : 0} - ${Math.min(startIdx + state.sellerPageSize, total)} of ${total} orders</span>
+      <div class="flex items-center gap-2">
+        <button id="prevPageBtn" class="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none cursor-pointer" ${state.sellerPage<=1?'disabled':''}>← Previous</button>
+        <span class="font-medium text-white">Page ${state.sellerPage} of ${totalPages}</span>
+        <button id="nextPageBtn" class="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none cursor-pointer" ${state.sellerPage>=totalPages?'disabled':''}>Next →</button>
+      </div>
+    </div>
+  `;
+
+  body.querySelectorAll("[data-filter]").forEach(btn=>{
+    btn.onclick = ()=>{
+      state.sellerOrderFilter = btn.dataset.filter;
+      state.sellerPage = 1;
+      renderSellerOrders();
+    };
+  });
+
+  const sInput = document.getElementById("sellerSearchInput");
+  sInput.oninput = (e)=>{
+    state.sellerSearch = e.target.value;
+    state.sellerPage = 1;
+    renderSellerOrders();
+  };
+  const clearBtn = document.getElementById("clearSearchBtn");
+  if(clearBtn) clearBtn.onclick = ()=>{
+    state.sellerSearch = "";
+    state.sellerPage = 1;
+    renderSellerOrders();
+  };
+
+  document.getElementById("sellerSortSelect").onchange = (e)=>{
+    state.sellerSort = e.target.value;
+    renderSellerOrders();
+  };
+
+  const prevBtn = document.getElementById("prevPageBtn");
+  if(prevBtn) prevBtn.onclick = ()=>{ if(state.sellerPage > 1){ state.sellerPage--; renderSellerOrders(); } };
+  const nextBtn = document.getElementById("nextPageBtn");
+  if(nextBtn) nextBtn.onclick = ()=>{ if(state.sellerPage < totalPages){ state.sellerPage++; renderSellerOrders(); } };
+}
+
+function sellerActionButtons(o){
+  if(o.status === "Cancelled") return `<span class="text-xs text-white/30">Cancelled</span>`;
+  if(o.status === "Completed") return `<span class="text-xs text-emerald-400 font-semibold">✓ Delivered</span>`;
+
+  let advanceBtn = '';
+  if(o.status === "Placed"){
+    advanceBtn = `<button class="btn-neon text-[11px] py-1 px-2.5 cursor-pointer" onclick="advanceOrderStatus('${o.id}', 'Processing')">Process</button>`;
+  } else if(o.status === "Processing" || o.status === "Delayed"){
+    advanceBtn = `<button class="btn-neon text-[11px] py-1 px-2.5 cursor-pointer" onclick="advanceOrderStatus('${o.id}', 'Completed')">Complete</button>`;
+  }
+
+  return `
+    ${advanceBtn}
+    <button class="btn-warning text-[11px] py-1 px-2.5 cursor-pointer" onclick="openDelayModal('${o.id}', '${o.eta}')">Delay</button>
+    <button class="btn-danger text-[11px] py-1 px-2.5 cursor-pointer" onclick="openCancelModal('${o.id}')">Cancel</button>
+  `;
+}
+
+async function advanceOrderStatus(id, status){
+  try{
+    const updated = await api(`/api/orders/${id}/status`, {method:"PATCH", body: JSON.stringify({status})});
+    const idx = state.orders.findIndex(o=>o.id===id);
+    if(idx>-1) state.orders[idx] = updated;
+    toast(`Order #${id} marked as ${status}`, "success");
+    refreshActiveSellerTab();
+  }catch(e){ toast("Status update failed: "+e.message, "error"); }
+}
+
+/* ---------- TAB 3: PRODUCTS & INVENTORY FOR THIS SELLER ---------- */
+function renderInventory(){
+  const body = document.getElementById("sellerBody");
+  if(!body) return;
+
+  const totalStockUnits = state.products.reduce((s,p)=>s+p.stock,0);
+  const outOfStockCount = state.products.filter(p=>p.stock<=0).length;
+
+  body.innerHTML = `
+    <div class="glass p-5 mb-5 fade-up flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div>
+        <h3 class="text-xl font-bold text-white flex items-center gap-2">
+          <span>📦 Store Catalog & Inventory · ${state.user.name}</span>
+        </h3>
+        <p class="text-xs text-white/50 mt-1">${state.products.length} products listed by Seller #${state.user.id} · ${totalStockUnits} total stock units</p>
+      </div>
+      <button onclick="openAddProductModal()" class="btn-neon text-xs font-semibold flex items-center gap-2 cursor-pointer">
+        <span>➕ Add New Product</span>
+      </button>
+    </div>
+
+    <!-- Inventory Table -->
+    <div class="glass overflow-x-auto scrollbar-thin">
+      <table class="w-full text-sm">
+        <thead class="text-white/40 text-left border-b border-white/10 text-xs uppercase tracking-wider">
+          <tr>
+            <th class="p-4">Product</th>
+            <th class="p-4">Category</th>
+            <th class="p-4">Price</th>
+            <th class="p-4">Stock Level</th>
+            <th class="p-4">Manage Quantity</th>
+            <th class="p-4 text-right">Delete</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${state.products.map(p=>{
+            const isOut = p.stock <= 0;
+            const isLow = p.stock > 0 && p.stock <= 5;
+            const stockBadge = isOut
+              ? `<span class="text-xs px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30 font-semibold">Out of stock</span>`
+              : isLow
+              ? `<span class="text-xs px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">Low (${p.stock})</span>`
+              : `<span class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">${p.stock} units</span>`;
+
+            return `
+            <tr class="border-t border-white/5 fade-up hover:bg-white/[0.02]">
+              <td class="p-4 flex items-center gap-3">
+                <span class="text-3xl">${p.icon || '📦'}</span>
+                <div>
+                  <p class="font-medium text-white">${p.name}</p>
+                  <p class="text-[11px] text-white/40 font-mono">ID: ${p.id}</p>
+                </div>
+              </td>
+              <td class="p-4 text-xs text-white/70">${p.category}</td>
+              <td class="p-4 font-bold text-cyan-300">₹${p.price.toLocaleString()}</td>
+              <td class="p-4">${stockBadge}</td>
+              <td class="p-4">
+                <div class="flex items-center gap-2">
+                  <button class="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold cursor-pointer" onclick="adjustProductStock('${p.id}', -1)" title="Reduce 1 unit">-1</button>
+                  <span class="w-12 text-center font-bold text-white font-mono">${p.stock}</span>
+                  <button class="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-bold cursor-pointer" onclick="adjustProductStock('${p.id}', 1)" title="Add 1 unit">+1</button>
+                  <button class="px-2 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-medium cursor-pointer ml-1" onclick="adjustProductStock('${p.id}', 10)">+10</button>
+                </div>
+              </td>
+              <td class="p-4 text-right">
+                <button class="text-xs text-red-400 hover:text-red-300 px-3 py-1.5 rounded-lg border border-red-500/30 hover:bg-red-500/10 cursor-pointer" onclick="deleteProductPrompt('${p.id}', '${p.name.replace(/'/g, "\\'")}')">🗑️ Delete</button>
+              </td>
+            </tr>`;
+          }).join("") || `
+            <tr>
+              <td class="p-10 text-center text-white/40 text-sm" colspan="6">
+                <div class="flex flex-col items-center justify-center gap-2">
+                  <span class="text-4xl">📦</span>
+                  <p class="font-bold text-white">Your store catalog is empty</p>
+                  <p class="text-xs text-white/50 mb-3">Add your first product so customers can buy from your store!</p>
+                  <button onclick="openAddProductModal()" class="btn-neon text-xs font-bold px-4 py-2 cursor-pointer">➕ Add Product Now</button>
+                </div>
+              </td>
+            </tr>
+          `}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function adjustProductStock(productId, delta){
+  try{
+    const updated = await api(`/api/products/${productId}/stock`, {method:"PATCH", body: JSON.stringify({delta})});
+    const pIdx = state.products.findIndex(p=>p.id===productId);
+    if(pIdx>-1) state.products[pIdx] = updated;
+    toast(`Updated ${updated.name} stock to ${updated.stock}`, "success");
+    renderInventory();
+  }catch(e){ toast("Stock update failed: "+e.message, "error"); }
+}
+
+async function deleteProductPrompt(productId, productName){
+  if(!confirm(`Are you sure you want to delete "${productName}" from your store catalog?`)) return;
+  try{
+    await api(`/api/products/${productId}`, {method:"DELETE"});
+    state.products = state.products.filter(p=>p.id!==productId);
+    toast(`Deleted ${productName}`, "info");
+    renderInventory();
+  }catch(e){ toast("Deletion failed: "+e.message, "error"); }
+}
+
+/* ---------- TAB 4: KANBAN BOARD ---------- */
+function renderKanban(){
+  const body = document.getElementById("sellerBody");
+  if(!body) return;
+  const cols = ["Placed","Processing","Delayed","Completed"];
+
+  body.innerHTML = `
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-bold text-white">Pipeline Kanban · ${state.user.name}</h3>
+      <span class="text-xs text-white/40">Real-time status management for this store</span>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      ${cols.map(c=>{
+        const ordersInCol = state.orders.filter(o=>o.status===c);
+        const colColor = c==="Placed" ? "text-cyan-300" : c==="Processing" ? "text-orange-300" : c==="Delayed" ? "text-amber-300" : "text-emerald-300";
+        return `
+        <div class="glass p-3.5 min-h-[300px] flex flex-col">
+          <div class="flex justify-between items-center pb-2.5 mb-3 border-b border-white/10">
+            <span class="text-xs uppercase font-bold tracking-wider ${colColor}">${c}</span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-white/10 font-mono">${ordersInCol.length}</span>
+          </div>
+          <div class="space-y-3 flex-1 overflow-y-auto scrollbar-thin">
+            ${ordersInCol.map(o=>`
+              <div class="glass p-3.5 pop-in hover:border-cyan-400/40 transition-all">
+                <div class="flex justify-between items-start mb-1.5">
+                  <span class="text-xs font-mono font-bold text-white">#${o.id}</span>
+                  <span class="text-xs font-bold text-cyan-300">₹${o.amount.toLocaleString()}</span>
+                </div>
+                <p class="text-xs text-white font-medium">${o.customer_name}</p>
+                <p class="text-[11px] text-white/50 mb-2">${o.items.map(i=>i.name+' x'+i.qty).join(', ')}</p>
+
+                ${o.delay_reason ? `<div class="text-[10px] text-amber-300 bg-amber-500/10 p-1.5 rounded-lg mb-2">⚠️ ${o.delay_reason}</div>` : ''}
+
+                <div class="flex items-center justify-between pt-2 border-t border-white/5 mt-2">
+                  <span class="text-[10px] text-white/40">ETA: ${o.eta}</span>
+                  <div class="flex items-center gap-1">
+                    ${c!=="Completed"?sellerActionButtons(o):'<span class="text-[10px] text-emerald-400 font-semibold">Done ✓</span>'}
+                  </div>
+                </div>
+              </div>
+            `).join("") || '<p class="text-white/30 text-xs text-center py-8">No orders in stage</p>'}
+          </div>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
+function statusBadge(status){
+  const map = {
+    Placed: "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40",
+    Processing: "bg-orange-500/20 text-orange-300 border border-orange-500/40",
+    Delayed: "bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse font-semibold",
+    Completed: "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold",
+    Cancelled: "bg-red-500/20 text-red-300 border border-red-500/40"
+  };
+  return `<span class="text-xs px-2.5 py-0.5 rounded-full ${map[status]||'bg-white/10 text-white'}">${status}</span>`;
+}
+
+/* ================= MODALS ================= */
+
+function openAddProductModal(){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-8 w-full max-w-lg pop-in bg-[#070b22]/95 relative z-50">
+        <div class="flex justify-between items-center mb-5">
+          <div>
+            <h3 class="text-xl font-bold text-white">➕ Add Product to ${state.user.name}</h3>
+            <p class="text-xs text-white/50">Store ID: #${state.user.id} · Instantly live on marketplace</p>
+          </div>
+          <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+        </div>
+
+        <form id="addProductForm" class="space-y-4">
+          <div>
+            <label class="block text-xs text-white/60 mb-1">Product Name</label>
+            <input id="newProdName" required type="text" placeholder="e.g. Sonic Wireless ANC Headphones" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-white/60 mb-1">Category</label>
+              <select id="newProdCategory" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-400 cursor-pointer">
+                <option value="Electronics" class="bg-[#050816]">Electronics</option>
+                <option value="Home" class="bg-[#050816]">Home & Living</option>
+                <option value="Fitness" class="bg-[#050816]">Fitness & Sports</option>
+                <option value="Fashion" class="bg-[#050816]">Fashion</option>
+                <option value="Accessories" class="bg-[#050816]">Accessories</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-white/60 mb-1">Icon / Emoji</label>
+              <select id="newProdIcon" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-400 cursor-pointer">
+                <option value="🎧">🎧 Headphones</option>
+                <option value="💡">💡 Lamp</option>
+                <option value="⌨️">⌨️ Keyboard</option>
+                <option value="☕">☕ Mug</option>
+                <option value="🧘">🧘 Yoga Mat</option>
+                <option value="🧴">🧴 Bottle</option>
+                <option value="📱">📱 Phone</option>
+                <option value="⌚">⌚ Smartwatch</option>
+                <option value="🎒">🎒 Backpack</option>
+                <option value="👟">👟 Sneakers</option>
+                <option value="🎮">🎮 Controller</option>
+                <option value="📦">📦 Box / Other</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-white/60 mb-1">Price (₹)</label>
+              <input id="newProdPrice" required type="number" min="1" step="1" placeholder="999" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+            <div>
+              <label class="block text-xs text-white/60 mb-1">Initial Stock Units</label>
+              <input id="newProdStock" required type="number" min="0" step="1" placeholder="30" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+          </div>
+
+          <div class="pt-3 flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="btn-neon text-xs font-semibold px-5 py-2.5 cursor-pointer">Create & Broadcast</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("addProductForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const name = document.getElementById("newProdName").value;
+    const category = document.getElementById("newProdCategory").value;
+    const icon = document.getElementById("newProdIcon").value;
+    const price = parseFloat(document.getElementById("newProdPrice").value);
+    const stock = parseInt(document.getElementById("newProdStock").value);
+
+    try{
+      const prod = await api("/api/products", {
+        method:"POST",
+        body: JSON.stringify({name, category, icon, price, stock})
+      });
+      state.products.push(prod);
+      toast(`Added ${prod.name} to ${state.user.name}!`, "success");
+      closeModal();
+      renderInventory();
+    }catch(err){ toast("Failed to add product: "+err.message, "error"); }
+  };
+}
+
+function openDelayModal(orderId, currentEta){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-7 w-full max-w-md pop-in bg-[#070b22]/95 relative z-50">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h3 class="text-lg font-bold text-white flex items-center gap-2">
+              <span>⏱️ Delay Order #${orderId}</span>
+            </h3>
+            <p class="text-xs text-white/50">Current ETA: <span class="text-cyan-300 font-mono">${currentEta}</span></p>
+          </div>
+          <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+        </div>
+
+        <form id="delayOrderForm" class="space-y-4">
+          <div>
+            <label class="block text-xs text-white/60 mb-2">Select Delay Minutes</label>
+            <div class="grid grid-cols-4 gap-2">
+              <button type="button" class="delay-min-btn active py-2 rounded-xl text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-400/50 cursor-pointer" data-mins="15">+15m</button>
+              <button type="button" class="delay-min-btn py-2 rounded-xl text-xs font-bold bg-white/5 text-white/70 border border-white/10 cursor-pointer" data-mins="30">+30m</button>
+              <button type="button" class="delay-min-btn py-2 rounded-xl text-xs font-bold bg-white/5 text-white/70 border border-white/10 cursor-pointer" data-mins="45">+45m</button>
+              <button type="button" class="delay-min-btn py-2 rounded-xl text-xs font-bold bg-white/5 text-white/70 border border-white/10 cursor-pointer" data-mins="60">+1h</button>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs text-white/60 mb-1.5">Reason for Delay</label>
+            <div class="flex flex-wrap gap-1.5 mb-2">
+              <button type="button" class="reason-chip text-[11px] px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 cursor-pointer" data-reason="Heavy Rain / Weather Issue">Heavy Rain</button>
+              <button type="button" class="reason-chip text-[11px] px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 cursor-pointer" data-reason="Traffic Jam / Transit Delay">Traffic Jam</button>
+              <button type="button" class="reason-chip text-[11px] px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 cursor-pointer" data-reason="High Order Volume / Packaging">Packaging Delay</button>
+            </div>
+            <input id="delayReasonInput" required type="text" value="Heavy Rain / Weather Issue" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+          </div>
+
+          <div class="pt-2 flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="btn-warning text-xs font-semibold px-5 py-2.5 cursor-pointer">Apply Delay & Notify Customer</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  let selectedMins = 15;
+  const btns = root.querySelectorAll(".delay-min-btn");
+  btns.forEach(b=>{
+    b.onclick = ()=>{
+      btns.forEach(x=>{ x.className = "delay-min-btn py-2 rounded-xl text-xs font-bold bg-white/5 text-white/70 border border-white/10 cursor-pointer"; });
+      b.className = "delay-min-btn py-2 rounded-xl text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-400/50 cursor-pointer";
+      selectedMins = +b.dataset.mins;
+    };
+  });
+
+  root.querySelectorAll(".reason-chip").forEach(chip=>{
+    chip.onclick = ()=>{
+      document.getElementById("delayReasonInput").value = chip.dataset.reason;
+    };
+  });
+
+  document.getElementById("delayOrderForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const reason = document.getElementById("delayReasonInput").value;
+    try{
+      const updated = await api(`/api/orders/${orderId}/delay`, {
+        method: "POST",
+        body: JSON.stringify({delay_minutes: selectedMins, reason})
+      });
+      const idx = state.orders.findIndex(o=>o.id===orderId);
+      if(idx>-1) state.orders[idx] = updated;
+      toast(`Order #${orderId} delayed: new ETA ${updated.eta}`, "warning");
+      closeModal();
+      refreshActiveSellerTab();
+    }catch(err){ toast("Delay failed: "+err.message, "error"); }
+  };
+}
+
+function openCancelModal(orderId){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-7 w-full max-w-md pop-in bg-[#070b22]/95 border-red-500/40 relative z-50">
+        <h3 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+          <span>✕ Cancel Order #${orderId}?</span>
+        </h3>
+        <p class="text-xs text-white/60 mb-4 leading-relaxed">
+          Cancelling will immediately notify the customer and automatically refund/restore all purchased item quantities back into available product stock.
+        </p>
+        <div class="flex justify-end gap-2">
+          <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Nevermind</button>
+          <button id="confirmCancelBtn" class="btn-danger text-xs font-semibold px-5 py-2.5 cursor-pointer">Confirm & Refund Stock</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById("confirmCancelBtn").onclick = async ()=>{
+    try{
+      const updated = await api(`/api/orders/${orderId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({status: "Cancelled"})
+      });
+      const idx = state.orders.findIndex(o=>o.id===orderId);
+      if(idx>-1) state.orders[idx] = updated;
+      toast(`Order #${orderId} cancelled. Inventory restored.`, "info");
+      closeModal();
+      refreshActiveSellerTab();
+    }catch(err){ toast("Cancellation failed: "+err.message, "error"); }
+  };
+}
+
+function closeModal(){
+  document.getElementById("modal-root").innerHTML = "";
+}
+
+/* ================= BOOTSTRAP ================= */
+renderLogin();
+</script>
+</body>
+</html>
