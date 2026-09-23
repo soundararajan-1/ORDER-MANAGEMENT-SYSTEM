@@ -130,3 +130,26 @@ Here are high-impact features recommended for future updates:
    - Integrate Razorpay or Stripe sandbox for credit card, UPI, and net-banking checkout.
 6. **Dark / Light Theme & Store Branding**:
    - Let sellers upload custom store banners and choose brand highlight colors.
+PROJECT OUTCOMES:
+<h2>📸 Project Screenshots</h2>
+
+<h3>🔐 Login Page</h3>
+<img src="login.png" width="800">
+
+<h3>🛒 Customer Page</h3>
+<img src="customerpage.png" width="800">
+
+<h3>👤 Customer Details</h3>
+<img src="customer.png" width="800">
+
+<h3>🛍️ Order Management</h3>
+<img src="order.png" width="800">
+
+<h3>📦 Order Tracking</h3>
+<img src="ordertracking.png" width="800">
+
+<h3>🏪 Seller Dashboard</h3>
+<img src="seller.png" width="800">
+
+<h3>⏰ Order Delay Reason</h3>
+<img src="delayreason.png" width="800">
