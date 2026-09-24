@@ -111,6 +111,25 @@
 
   #confetti-canvas{position:fixed; inset:0; pointer-events:none; z-index:70;}
   .modal-backdrop{position:fixed; inset:0; background:rgba(5,8,22,0.85); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); z-index:50;}
+
+  /* ---------- print styles for invoices & shipping labels ---------- */
+  @media print {
+    body * { visibility: hidden !important; }
+    #printableDoc, #printableDoc * { visibility: visible !important; color: #111 !important; }
+    #printableDoc {
+      position: absolute !important;
+      left: 0 !important;
+      top: 0 !important;
+      width: 100% !important;
+      background: #ffffff !important;
+      color: #111111 !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      border: none !important;
+      box-shadow: none !important;
+    }
+    .no-print { display: none !important; }
+  }
 </style>
 </head>
 <body>
@@ -124,6 +143,7 @@
 <canvas id="confetti-canvas"></canvas>
 <div id="toast-root" class="fixed top-6 right-6 z-50 flex flex-col gap-2"></div>
 <div id="modal-root"></div>
+<div id="chatDrawer" data-open="false" class="fixed top-0 right-0 h-full w-full sm:w-[460px] translate-x-full transition-transform duration-300 z-50 p-4"></div>
 
 <div id="app" class="relative z-10 min-h-screen"></div>
 
@@ -151,6 +171,15 @@ const state = {
   sellerSort: "newest",
   sellerPage: 1,
   sellerPageSize: 8,
+  // New upgraded modules:
+  activeCoupon: null,
+  coupons: [],
+  activeChatOrderId: null,
+  activeChatOrder: null,
+  chatMessages: [],
+  selectedPaymentMethod: "UPI",
+  deliveryAddress: "Flat 402, Skyline Towers, Indiranagar, Bangalore - 560038",
+  deliveryPhone: "+91 98765 43210",
 };
 
 /* ================= AUDIO CHIME ================= */
@@ -335,6 +364,32 @@ function connectWebSocket(){
       } else if(state.role === "seller") {
         const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab;
         if(activeTab === "Products & Stock") renderInventory();
+      }
+    }
+
+    // 6. Payment update (Seller verified payment / COD accepted)
+    if(msg.type === "payment_update"){
+      const idx = state.orders.findIndex(o=>o.id===msg.order.id);
+      if(idx>-1) state.orders[idx] = msg.order; else state.orders.unshift(msg.order);
+      playOrderChime();
+      if(state.role === "seller"){
+        toast(`💰 Payment confirmed for Order #${msg.order.id}`, "success");
+        refreshActiveSellerTab();
+      } else {
+        toast(`💰 Order #${msg.order.id} payment verified: ${msg.order.payment_status}`, "success");
+        const activeTab = document.querySelector("[data-tab].active")?.dataset?.tab || "My Orders";
+        if(activeTab === "My Orders") renderCustomerOrders();
+      }
+    }
+
+    // 7. Real-time Customer <-> Seller Chat Message
+    if(msg.type === "chat_message"){
+      playOrderChime();
+      if(state.activeChatOrderId === msg.message.order_id){
+        state.chatMessages.push(msg.message);
+        renderChatMessages();
+      } else {
+        toast(`💬 [Order #${msg.message.order_id}] ${msg.message.sender_name}: "${msg.message.message}"`, "info");
       }
     }
   };
@@ -771,60 +826,230 @@ function filterShopBySeller(sellerName){
   renderShop();
 }
 
+async function applyCoupon(code){
+  const rawSubtotal = state.cart.reduce((s,i)=>s+i.price*i.qty,0);
+  try{
+    const res = await api("/api/coupons/validate", {
+      method: "POST",
+      body: JSON.stringify({code, order_amount: rawSubtotal})
+    });
+    state.activeCoupon = res;
+    toast(res.message, "success");
+    openCart();
+  }catch(e){
+    toast("Coupon: " + e.message, "error");
+  }
+}
+
 function openCart(){
   const drawer = document.getElementById("cartDrawer");
+  if(!drawer) return;
   drawer.dataset.open = "true";
-  const total = state.cart.reduce((s,i)=>s+i.price*i.qty,0);
+  const rawSubtotal = state.cart.reduce((s,i)=>s+i.price*i.qty,0);
 
-  // Group items by seller in the cart
+  // Re-verify coupon discount against current cart
+  let discountAmount = 0;
+  if(state.activeCoupon){
+    if(rawSubtotal < state.activeCoupon.min_order){
+      state.activeCoupon = null;
+      toast("Coupon removed: cart fell below minimum required value", "warning");
+    } else {
+      if(state.activeCoupon.discount_type === "percent"){
+        discountAmount = Math.round((rawSubtotal * state.activeCoupon.discount_value) / 100);
+      } else {
+        discountAmount = Math.min(state.activeCoupon.discount_value, rawSubtotal);
+      }
+      state.activeCoupon.discount_amount = discountAmount;
+    }
+  }
+
+  const finalPayable = Math.max(0, rawSubtotal - discountAmount);
   const sellersInCart = Array.from(new Set(state.cart.map(i=>i.seller_name || 'Verified Seller')));
 
   drawer.innerHTML = `
-    <div class="glass glow-border h-full p-6 flex flex-col pop-in bg-[#070b22]/95">
-      <div class="flex justify-between items-center mb-3">
-        <h3 class="font-semibold text-base flex items-center gap-2">
-          <span>🛒 Your Shopping Cart</span>
-          <span class="text-xs text-cyan-300">(${state.cart.length})</span>
+    <div class="glass glow-border h-full p-5 sm:p-6 flex flex-col pop-in bg-[#070b22]/98 border-cyan-400/40 overflow-hidden">
+      <!-- Header -->
+      <div class="flex justify-between items-center pb-3 mb-3 border-b border-white/10 shrink-0">
+        <h3 class="font-bold text-base flex items-center gap-2 text-white">
+          <span>🛒 Checkout & Payment</span>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono font-semibold">${state.cart.length} item(s)</span>
         </h3>
-        <button id="closeCart" class="text-white/50 hover:text-white cursor-pointer p-1">✕</button>
+        <button id="closeCart" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
       </div>
 
-      ${sellersInCart.length > 1 ? `
-        <div class="mb-3 p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-[11px] text-purple-300">
-          ⚡ <strong>Multi-Seller Cart:</strong> Items from ${sellersInCart.length} different sellers will be split into individual seller orders upon checkout.
-        </div>
-      ` : ''}
+      <div class="flex-1 overflow-y-auto scrollbar-thin space-y-4 pr-1">
+        ${sellersInCart.length > 1 ? `
+          <div class="p-2.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-[11px] text-purple-300">
+            ⚡ <strong>Flipkart Multi-Seller Cart:</strong> Items from ${sellersInCart.length} stores will be split into individual seller dispatch packages upon order placement.
+          </div>
+        ` : ''}
 
-      <div class="flex-1 overflow-y-auto scrollbar-thin space-y-3">
-        ${state.cart.length===0 ? '<p class="text-white/40 text-sm text-center py-10">Your cart is empty.</p>' : state.cart.map((i,idx)=>{
-          const prod = state.products.find(p=>p.id===i.product_id);
-          const maxStock = prod ? prod.stock : i.qty;
-          return `
-          <div class="glass p-3 flex justify-between items-center gap-3">
-            <div class="flex items-center gap-3">
-              <span class="text-2xl">${i.icon || '📦'}</span>
-              <div>
-                <p class="text-sm font-medium text-white">${i.name}</p>
-                <p class="text-[11px] text-cyan-300/80">🏪 ${i.seller_name}</p>
-                <p class="text-xs text-white/40">₹${i.price.toLocaleString()} each · Max: ${maxStock}</p>
+        <!-- Items list -->
+        <div class="space-y-2">
+          ${state.cart.length===0 ? '<p class="text-white/40 text-sm text-center py-10">Your cart is empty.</p>' : state.cart.map((i,idx)=>{
+            const prod = state.products.find(p=>p.id===i.product_id);
+            const maxStock = prod ? prod.stock : i.qty;
+            return `
+            <div class="glass p-3 flex justify-between items-center gap-3">
+              <div class="flex items-center gap-2.5">
+                <span class="text-2xl">${i.icon || '📦'}</span>
+                <div>
+                  <p class="text-xs font-semibold text-white">${i.name}</p>
+                  <p class="text-[10px] text-cyan-300">🏪 ${i.seller_name}</p>
+                  <p class="text-[11px] text-white/50">₹${i.price.toLocaleString()} each</p>
+                </div>
               </div>
-            </div>
-            <div class="flex items-center gap-2">
-              <button class="w-6 h-6 rounded bg-white/10 hover:bg-white/20 text-xs font-bold cursor-pointer" data-qty-dec="${idx}">-</button>
-              <span class="text-xs font-bold text-cyan-300 min-w-[14px] text-center">${i.qty}</span>
-              <button class="w-6 h-6 rounded bg-white/10 hover:bg-white/20 text-xs font-bold cursor-pointer" data-qty-inc="${idx}">+</button>
-              <button class="text-red-400 hover:text-red-300 text-xs ml-1 cursor-pointer" data-remove="${idx}">✕</button>
-            </div>
-          </div>`;
-        }).join("")}
-      </div>
-      <div class="pt-4 border-t border-white/10 mt-4">
-        <div class="flex justify-between text-sm mb-3">
-          <span>Subtotal</span>
-          <span class="text-cyan-300 font-bold text-lg">₹${total.toLocaleString()}</span>
+              <div class="flex items-center gap-1.5">
+                <button class="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold cursor-pointer" data-qty-dec="${idx}">-</button>
+                <span class="text-xs font-bold text-cyan-300 min-w-[16px] text-center">${i.qty}</span>
+                <button class="w-6 h-6 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold cursor-pointer" data-qty-inc="${idx}">+</button>
+                <button class="text-red-400 hover:text-red-300 text-xs ml-1 cursor-pointer p-1" data-remove="${idx}">✕</button>
+              </div>
+            </div>`;
+          }).join("")}
         </div>
-        <button id="checkoutBtn" class="btn-neon w-full pulse cursor-pointer font-bold py-3 flex items-center justify-center gap-2" ${state.cart.length===0?'disabled style="opacity:.4;pointer-events:none"':''}>
-          <span>Place Order Now</span>
+
+        ${state.cart.length > 0 ? `
+          <!-- Promo Coupons Section -->
+          <div class="glass p-3.5 space-y-2.5 border-purple-500/30">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-purple-300 flex items-center gap-1">
+                <span>🎟️ Promo Code & Discounts</span>
+              </span>
+              ${state.activeCoupon ? `
+                <button id="removeCouponBtn" class="text-[11px] text-red-400 hover:underline cursor-pointer">Remove</button>
+              ` : ''}
+            </div>
+
+            ${state.activeCoupon ? `
+              <div class="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs flex justify-between items-center">
+                <span>✓ Code <strong>${state.activeCoupon.code}</strong> applied</span>
+                <span class="font-bold">-₹${discountAmount.toLocaleString()}</span>
+              </div>
+            ` : `
+              <div class="flex gap-2">
+                <input id="couponInput" type="text" placeholder="Enter coupon (e.g. WELCOME50)" class="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white uppercase placeholder-white/40 focus:outline-none focus:border-cyan-400" />
+                <button id="applyCouponBtn" class="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold cursor-pointer">Apply</button>
+              </div>
+              <div class="flex items-center gap-1.5 flex-wrap pt-1">
+                <span class="text-[10px] text-white/40">Try:</span>
+                <button class="coupon-chip text-[10px] px-2 py-0.5 rounded-md bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 cursor-pointer" data-code="WELCOME50">WELCOME50</button>
+                <button class="coupon-chip text-[10px] px-2 py-0.5 rounded-md bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 cursor-pointer" data-code="FESTIVE15">FESTIVE15</button>
+                <button class="coupon-chip text-[10px] px-2 py-0.5 rounded-md bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 cursor-pointer" data-code="FREESHIP">FREESHIP</button>
+              </div>
+            `}
+          </div>
+
+          <!-- Delivery Address & Phone -->
+          <div class="glass p-3.5 space-y-2 border-white/10">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-white/80">📍 Shipping Address</span>
+              <span class="text-[10px] text-emerald-400">Doorstep Delivery</span>
+            </div>
+            <textarea id="deliveryAddressInput" rows="2" placeholder="Street address, apartment, pincode..." class="w-full bg-white/5 border border-white/10 rounded-xl p-2.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-cyan-400">${state.deliveryAddress}</textarea>
+            <input id="deliveryPhoneInput" type="text" placeholder="Contact Mobile (+91...)" value="${state.deliveryPhone}" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <!-- Interactive Payment Gateway Selector -->
+          <div class="glass p-3.5 space-y-3 border-cyan-500/30">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                <span>💳 Payment Gateway</span>
+              </span>
+              <span class="text-[10px] text-white/40">256-Bit SSL Encrypted</span>
+            </div>
+
+            <!-- Payment Method Tabs -->
+            <div class="grid grid-cols-4 gap-1.5 p-1 rounded-xl bg-white/5 border border-white/10">
+              <button type="button" class="pay-method-tab py-1.5 text-[11px] font-semibold rounded-lg text-center cursor-pointer transition-all ${state.selectedPaymentMethod==='UPI'?'bg-cyan-500/25 text-cyan-300 border border-cyan-400':'text-white/60 hover:text-white'}" data-method="UPI">📱 UPI</button>
+              <button type="button" class="pay-method-tab py-1.5 text-[11px] font-semibold rounded-lg text-center cursor-pointer transition-all ${state.selectedPaymentMethod==='Card'?'bg-cyan-500/25 text-cyan-300 border border-cyan-400':'text-white/60 hover:text-white'}" data-method="Card">💳 Card</button>
+              <button type="button" class="pay-method-tab py-1.5 text-[11px] font-semibold rounded-lg text-center cursor-pointer transition-all ${state.selectedPaymentMethod==='NetBanking'?'bg-cyan-500/25 text-cyan-300 border border-cyan-400':'text-white/60 hover:text-white'}" data-method="NetBanking">🏦 Bank</button>
+              <button type="button" class="pay-method-tab py-1.5 text-[11px] font-semibold rounded-lg text-center cursor-pointer transition-all ${state.selectedPaymentMethod==='COD'?'bg-cyan-500/25 text-cyan-300 border border-cyan-400':'text-white/60 hover:text-white'}" data-method="COD">💵 COD</button>
+            </div>
+
+            <!-- Payment Tab Contents -->
+            ${state.selectedPaymentMethod === 'UPI' ? `
+              <div class="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/20 text-center space-y-2.5 fade-up">
+                <div class="inline-block p-2 rounded-xl bg-white text-slate-900 shadow-lg">
+                  <svg width="90" height="90" viewBox="0 0 100 100" class="mx-auto">
+                    <rect width="100" height="100" fill="#fff" />
+                    <rect x="5" y="5" width="28" height="28" fill="#000" /><rect x="9" y="9" width="20" height="20" fill="#fff" /><rect x="13" y="13" width="12" height="12" fill="#000" />
+                    <rect x="67" y="5" width="28" height="28" fill="#000" /><rect x="71" y="9" width="20" height="20" fill="#fff" /><rect x="75" y="13" width="12" height="12" fill="#000" />
+                    <rect x="5" y="67" width="28" height="28" fill="#000" /><rect x="9" y="71" width="20" height="20" fill="#fff" /><rect x="13" y="75" width="12" height="12" fill="#000" />
+                    <rect x="38" y="12" width="6" height="6" fill="#000" /><rect x="48" y="18" width="6" height="6" fill="#000" />
+                    <rect x="38" y="38" width="24" height="24" fill="#000" /><rect x="44" y="44" width="12" height="12" fill="#fff" /><rect x="48" y="48" width="4" height="4" fill="#000" />
+                    <rect x="70" y="40" width="8" height="8" fill="#000" /><rect x="18" y="44" width="6" height="6" fill="#000" />
+                    <rect x="70" y="70" width="8" height="8" fill="#000" /><rect x="82" y="82" width="8" height="8" fill="#000" />
+                    <rect x="40" y="75" width="14" height="6" fill="#000" /><rect x="58" y="68" width="6" height="12" fill="#000" />
+                  </svg>
+                </div>
+                <div>
+                  <p class="text-[11px] text-cyan-300 font-semibold">Scan with GPay, PhonePe, or Paytm</p>
+                  <p class="text-[10px] text-white/50">Dynamic VPA: <span class="font-mono text-white">orderflow.ai@upi</span></p>
+                </div>
+              </div>
+            ` : state.selectedPaymentMethod === 'Card' ? `
+              <div class="p-3 rounded-xl bg-purple-950/20 border border-purple-500/20 space-y-2.5 fade-up">
+                <div>
+                  <label class="block text-[10px] text-white/50 mb-0.5">Card Number</label>
+                  <input type="text" value="4532 •••• •••• 8820" class="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono" />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="block text-[10px] text-white/50 mb-0.5">Valid Thru</label>
+                    <input type="text" value="12/28" class="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono" />
+                  </div>
+                  <div>
+                    <label class="block text-[10px] text-white/50 mb-0.5">CVV</label>
+                    <input type="password" value="888" class="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono" />
+                  </div>
+                </div>
+              </div>
+            ` : state.selectedPaymentMethod === 'NetBanking' ? `
+              <div class="p-3 rounded-xl bg-white/5 border border-white/10 space-y-2 fade-up">
+                <p class="text-[11px] text-white/70">Select your bank for instant netbanking transfer:</p>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <button type="button" class="py-1.5 px-2 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/90 border border-white/10 text-left">🏦 HDFC Bank</button>
+                  <button type="button" class="py-1.5 px-2 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/90 border border-white/10 text-left">🏦 ICICI Bank</button>
+                  <button type="button" class="py-1.5 px-2 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/90 border border-white/10 text-left">🏦 State Bank (SBI)</button>
+                  <button type="button" class="py-1.5 px-2 rounded-lg bg-white/5 hover:bg-white/10 text-[11px] text-white/90 border border-white/10 text-left">🏦 Axis Bank</button>
+                </div>
+              </div>
+            ` : `
+              <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs space-y-1 fade-up">
+                <p class="font-bold flex items-center gap-1.5"><span>💵 Cash on Delivery (COD)</span></p>
+                <p class="text-[11px] text-white/70">Pay in cash or UPI upon package handover. Store will confirm & accept payment upon delivery.</p>
+              </div>
+            `}
+          </div>
+        ` : ''}
+      </div>
+
+      <!-- Financial Total Footer -->
+      <div class="pt-4 border-t border-white/10 mt-3 shrink-0 space-y-2">
+        <div class="space-y-1 text-xs">
+          <div class="flex justify-between text-white/60">
+            <span>Subtotal</span>
+            <span>₹${rawSubtotal.toLocaleString()}</span>
+          </div>
+          ${discountAmount > 0 ? `
+            <div class="flex justify-between text-emerald-400 font-semibold">
+              <span>Coupon Discount (${state.activeCoupon.code})</span>
+              <span>-₹${discountAmount.toLocaleString()}</span>
+            </div>
+          ` : ''}
+          <div class="flex justify-between text-white/60">
+            <span>Delivery Shipping</span>
+            <span class="text-emerald-400 font-bold uppercase">FREE</span>
+          </div>
+          <div class="flex justify-between text-sm pt-1 border-t border-white/5 font-bold">
+            <span class="text-white">Total Payable</span>
+            <span class="text-cyan-300 text-lg">₹${finalPayable.toLocaleString()}</span>
+          </div>
+        </div>
+
+        <button id="checkoutBtn" class="btn-neon w-full pulse cursor-pointer font-bold py-3 flex items-center justify-center gap-2 mt-2" ${state.cart.length===0?'disabled style="opacity:.4;pointer-events:none"':''}>
+          <span>${state.selectedPaymentMethod === 'COD' ? `Place COD Order (₹${finalPayable.toLocaleString()})` : `Pay ₹${finalPayable.toLocaleString()} & Place Order`}</span>
           <span class="text-xs">⚡</span>
         </button>
       </div>
@@ -839,11 +1064,7 @@ function openCart(){
   drawer.querySelectorAll("[data-qty-dec]").forEach(btn=>{
     btn.onclick = ()=>{
       const idx = +btn.dataset.qtyDec;
-      if(state.cart[idx].qty > 1){
-        state.cart[idx].qty -= 1;
-      } else {
-        state.cart.splice(idx,1);
-      }
+      if(state.cart[idx].qty > 1) state.cart[idx].qty -= 1; else state.cart.splice(idx,1);
       openCart();
     };
   });
@@ -866,29 +1087,90 @@ function openCart(){
     btn.onclick = ()=>{ state.cart.splice(+btn.dataset.remove,1); openCart(); };
   });
 
+  // Payment method selection
+  drawer.querySelectorAll(".pay-method-tab").forEach(tabBtn=>{
+    tabBtn.onclick = ()=>{
+      state.selectedPaymentMethod = tabBtn.dataset.method;
+      openCart();
+    };
+  });
+
+  // Coupon application
+  const applyBtn = document.getElementById("applyCouponBtn");
+  if(applyBtn){
+    applyBtn.onclick = ()=>{
+      const code = document.getElementById("couponInput")?.value.trim().toUpperCase();
+      if(code) applyCoupon(code);
+    };
+  }
+
+  const removeCpnBtn = document.getElementById("removeCouponBtn");
+  if(removeCpnBtn){
+    removeCpnBtn.onclick = ()=>{
+      state.activeCoupon = null;
+      toast("Coupon removed", "info");
+      openCart();
+    };
+  }
+
+  drawer.querySelectorAll(".coupon-chip").forEach(chip=>{
+    chip.onclick = ()=> applyCoupon(chip.dataset.code);
+  });
+
   const co = document.getElementById("checkoutBtn");
   if(co) co.onclick = placeOrder;
 }
 
 async function placeOrder(){
+  const rawSubtotal = state.cart.reduce((s,i)=>s+i.price*i.qty,0);
+  if(rawSubtotal <= 0) return;
+
+  const addr = (document.getElementById("deliveryAddressInput")?.value || state.deliveryAddress).trim();
+  const phone = (document.getElementById("deliveryPhoneInput")?.value || state.deliveryPhone).trim();
+  state.deliveryAddress = addr;
+  state.deliveryPhone = phone;
+
+  const btn = document.getElementById("checkoutBtn");
+  if(btn){
+    btn.disabled = true;
+    btn.innerHTML = `<span class="inline-block animate-spin mr-2">⚙️</span> Processing ${state.selectedPaymentMethod} Payment...`;
+  }
+
   try{
     const res = await api("/api/orders", {
       method:"POST",
       body: JSON.stringify({
-        items: state.cart.map(i=>({product_id: i.product_id, name: i.name, price: i.price, qty: i.qty}))
+        items: state.cart.map(i=>({product_id: i.product_id, name: i.name, price: i.price, qty: i.qty})),
+        payment_method: state.selectedPaymentMethod,
+        shipping_address: `${addr} (Ph: ${phone})`,
+        coupon_code: state.activeCoupon ? state.activeCoupon.code : "",
+        discount_amount: state.activeCoupon ? (state.activeCoupon.discount_amount || 0) : 0
       })
     });
-    // Add created orders
+
     if(res.orders){
       res.orders.forEach(o=> state.orders.unshift(o));
     } else if(res.order){
       state.orders.unshift(res.order);
     }
     state.cart = [];
+    state.activeCoupon = null;
+
+    const drawer = document.getElementById("cartDrawer");
+    if(drawer){
+      drawer.dataset.open = "false";
+      drawer.style.transform = "translateX(100%)";
+    }
+
+    confettiBurst();
     toast(res.message || "Order placed successfully!", "success");
     renderCustomer("My Orders");
   }catch(e){
     toast("Order failed: " + e.message, "error");
+    if(btn){
+      btn.disabled = false;
+      btn.innerHTML = `<span>Place Order</span> ⚡`;
+    }
   }
 }
 
@@ -899,7 +1181,7 @@ function renderCustomerOrders(){
 
   body.innerHTML = `
     <div class="flex items-center justify-between mb-4">
-      <h3 class="text-lg font-semibold">My Orders (${state.orders.length})</h3>
+      <h3 class="text-lg font-semibold text-white">My Orders (${state.orders.length})</h3>
       <button onclick="renderCustomer('Shop')" class="text-xs text-cyan-300 hover:underline cursor-pointer">← Back to Shop</button>
     </div>
     <div class="space-y-5">
@@ -907,17 +1189,27 @@ function renderCustomerOrders(){
       const cancelled = o.status==="Cancelled";
       const delayed = o.status==="Delayed";
       const stepIdx = cancelled ? -1 : (delayed ? 1 : stages.indexOf(o.status));
+      const isPaid = o.payment_status && o.payment_status.startsWith("Paid");
 
       return `
       <div class="glass p-5 fade-up ${delayed ? 'border-amber-400/50 shadow-amber-500/10' : cancelled ? 'border-red-500/40' : ''}">
         <div class="flex justify-between items-start mb-3 gap-3 flex-wrap">
           <div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
               <span class="font-bold text-base text-white">Order #${o.id}</span>
               ${statusBadge(o.status)}
+              <span class="text-[11px] px-2.5 py-0.5 rounded-full font-medium ${isPaid ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}">
+                ${isPaid ? '✓ ' + (o.payment_status || 'Paid') : '🟡 ' + (o.payment_status || 'COD Due')} (${o.payment_method || 'UPI'})
+              </span>
+              ${o.discount_amount > 0 ? `
+                <span class="text-[11px] px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 font-medium">
+                  🎟️ ${o.coupon_code} (-₹${o.discount_amount})
+                </span>
+              ` : ''}
             </div>
             <p class="text-xs text-cyan-300/80 mt-1 font-medium">🏪 Store: <strong>${o.seller_name || 'Verified Seller'}</strong> (#${o.seller_id})</p>
             <p class="text-xs text-white/60 mt-1">${o.items.map(i=>`${i.name} ×${i.qty}`).join(", ")}</p>
+            ${o.shipping_address ? `<p class="text-[11px] text-white/40 mt-0.5">📍 Deliver to: ${o.shipping_address}</p>` : ''}
           </div>
           <div class="text-right">
             <p class="text-cyan-300 font-bold text-lg">₹${o.amount.toLocaleString()}</p>
@@ -951,11 +1243,20 @@ function renderCustomerOrders(){
           </div>
         `}
 
-        ${o.status === "Placed" ? `
-          <div class="mt-4 pt-3 border-t border-white/5 flex justify-end">
-            <button class="text-xs text-red-400 hover:text-red-300 cursor-pointer" onclick="customerCancelOrder('${o.id}')">Cancel Order</button>
+        <div class="mt-4 pt-3 border-t border-white/5 flex items-center justify-between flex-wrap gap-2">
+          <div class="flex items-center gap-2">
+            <button onclick="openInvoiceModal('${o.id}')" class="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 text-xs flex items-center gap-1.5 cursor-pointer font-medium">
+              <span>📄 Tax Invoice</span>
+            </button>
+            <button onclick="openChatDrawer('${o.id}')" class="px-3 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 text-xs flex items-center gap-1.5 cursor-pointer font-medium">
+              <span>💬 Chat with Store</span>
+            </button>
           </div>
-        ` : ''}
+
+          ${o.status === "Placed" ? `
+            <button class="text-xs text-red-400 hover:text-red-300 cursor-pointer ml-auto" onclick="customerCancelOrder('${o.id}')">Cancel Order</button>
+          ` : ''}
+        </div>
       </div>`;
     }).join("")}
     </div>`;
@@ -981,12 +1282,13 @@ async function enterSeller(isNewStore=false){
 
 async function renderSeller(tab="Overview", isNewStore=false){
   const app = document.getElementById("app");
-  app.innerHTML = navBar(["Overview","Live Orders","Products & Stock","Kanban"], tab, (t)=>renderSeller(t)) + `<div id="sellerBody" class="max-w-7xl mx-auto px-4 pb-16"></div>`;
+  app.innerHTML = navBar(["Overview","Live Orders","Products & Stock","Coupons","Kanban"], tab, (t)=>renderSeller(t)) + `<div id="sellerBody" class="max-w-7xl mx-auto px-4 pb-16"></div>`;
   wireNav((t)=>renderSeller(t));
 
   if(tab==="Overview") await renderSellerOverview(isNewStore);
   else if(tab==="Live Orders") renderSellerOrders();
   else if(tab==="Products & Stock") renderInventory();
+  else if(tab==="Coupons") await renderSellerCoupons();
   else renderKanban();
 }
 
@@ -1324,7 +1626,18 @@ function renderSellerOrders(){
 
 function sellerActionButtons(o){
   if(o.status === "Cancelled") return `<span class="text-xs text-white/30">Cancelled</span>`;
-  if(o.status === "Completed") return `<span class="text-xs text-emerald-400 font-semibold">✓ Delivered</span>`;
+  if(o.status === "Completed"){
+    return `
+      <span class="text-xs text-emerald-400 font-semibold">✓ Delivered</span>
+      <button class="text-[11px] px-2.5 py-1 rounded-xl bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 cursor-pointer" onclick="openInvoiceModal('${o.id}')">📄 Invoice</button>
+      <button class="text-[11px] px-2.5 py-1 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 cursor-pointer" onclick="openChatDrawer('${o.id}')">💬 Chat</button>
+    `;
+  }
+
+  const paymentPending = o.payment_status && (o.payment_status === 'Pending COD' || o.payment_status === 'Pending');
+  let payBtn = paymentPending
+    ? `<button class="text-[11px] px-2 py-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 cursor-pointer font-semibold" onclick="sellerAcceptPayment('${o.id}')">💰 Accept COD</button>`
+    : '';
 
   let advanceBtn = '';
   if(o.status === "Placed"){
@@ -1335,9 +1648,21 @@ function sellerActionButtons(o){
 
   return `
     ${advanceBtn}
+    ${payBtn}
+    <button class="text-[11px] px-2 py-1 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 cursor-pointer" onclick="openChatDrawer('${o.id}')">💬</button>
     <button class="btn-warning text-[11px] py-1 px-2.5 cursor-pointer" onclick="openDelayModal('${o.id}', '${o.eta}')">Delay</button>
     <button class="btn-danger text-[11px] py-1 px-2.5 cursor-pointer" onclick="openCancelModal('${o.id}')">Cancel</button>
   `;
+}
+
+async function sellerAcceptPayment(orderId){
+  try{
+    const updated = await api(`/api/orders/${orderId}/accept-payment`, {method: 'POST'});
+    const idx = state.orders.findIndex(o=>o.id===orderId);
+    if(idx>-1) state.orders[idx] = updated;
+    toast(`💰 Payment accepted for Order #${orderId}!`, 'success');
+    refreshActiveSellerTab();
+  }catch(e){ toast('Payment acceptance failed: '+e.message, 'error'); }
 }
 
 async function advanceOrderStatus(id, status){
@@ -1512,6 +1837,478 @@ function statusBadge(status){
     Cancelled: "bg-red-500/20 text-red-300 border border-red-500/40"
   };
   return `<span class="text-xs px-2.5 py-0.5 rounded-full ${map[status]||'bg-white/10 text-white'}">${status}</span>`;
+}
+
+/* ================= SELLER COUPONS TAB ================= */
+async function renderSellerCoupons(){
+  const body = document.getElementById('sellerBody');
+  if(!body) return;
+
+  let coupons = [];
+  try{ coupons = await api('/api/coupons'); }catch(e){}
+  state.coupons = coupons;
+
+  body.innerHTML = `
+    <div class="glass p-5 mb-5 fade-up flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div>
+        <h3 class="text-xl font-bold text-white flex items-center gap-2">
+          <span>🎟️ Coupon & Promo Engine · ${state.user.name}</span>
+        </h3>
+        <p class="text-xs text-white/50 mt-1">${coupons.length} active coupon code(s) · Drives customer repeat purchases</p>
+      </div>
+      <button onclick="openCreateCouponModal()" class="btn-neon text-xs font-semibold flex items-center gap-2 cursor-pointer">
+        <span>➕ Create New Coupon</span>
+      </button>
+    </div>
+
+    <!-- Available Coupons Grid -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+      ${coupons.length === 0 ? `
+        <div class="glass p-10 text-center text-white/40 col-span-3">
+          <p class="text-4xl mb-2">🎟️</p>
+          <p class="font-bold text-white">No coupons created yet</p>
+          <p class="text-xs text-white/50 mt-1">Create discount codes to drive more sales!</p>
+        </div>
+      ` : coupons.map(c => {
+        const isAll = c.seller_id === 'all';
+        const isPercent = c.discount_type === 'percent';
+        const displayVal = isPercent ? `${c.discount_value}% OFF` : `₹${c.discount_value} OFF`;
+        return `
+        <div class="glass p-5 fade-up hover:border-purple-400/40 transition-all flex flex-col justify-between gap-3 ${!c.is_active ? 'opacity-50' : ''}">
+          <div>
+            <div class="flex justify-between items-start mb-2">
+              <span class="font-mono font-extrabold text-lg text-white tracking-wider">${c.code}</span>
+              <span class="text-xs px-2.5 py-0.5 rounded-full font-bold ${isPercent ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'bg-purple-500/20 text-purple-300 border border-purple-500/40'}">${displayVal}</span>
+            </div>
+            <div class="space-y-1 text-xs text-white/60">
+              <p>Min order: <span class="text-white font-medium">₹${c.min_order}</span></p>
+              <p>Scope: <span class="text-white font-medium">${isAll ? '🌐 All stores' : '🏪 Your store only'}</span></p>
+              <p>Status: <span class="font-medium ${c.is_active ? 'text-emerald-400' : 'text-red-400'}">${c.is_active ? '✓ Active' : '✕ Inactive'}</span></p>
+            </div>
+          </div>
+          <div class="flex items-center justify-between pt-3 border-t border-white/5">
+            <span class="text-[10px] font-mono text-white/30">ID: ${c.id}</span>
+            ${!isAll ? `<button class="text-xs text-red-400 hover:text-red-300 px-3 py-1 rounded-lg border border-red-500/30 hover:bg-red-500/10 cursor-pointer" onclick="deleteCoupon('${c.id}', '${c.code}')">🗑️ Delete</button>` : `<span class="text-[10px] text-white/30">Platform coupon</span>`}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- Coupon Usage Guide -->
+    <div class="glass p-5 fade-up">
+      <h4 class="text-sm font-bold text-white mb-3">💡 Available Promo Codes for Customers</h4>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        ${['WELCOME50','FESTIVE15','FREESHIP','TECH10'].map(code=>`
+          <div class="p-3 rounded-xl bg-white/5 border border-white/10 text-center">
+            <p class="font-mono font-bold text-cyan-300 text-sm">${code}</p>
+            <p class="text-[11px] text-white/50 mt-1">${code==='WELCOME50'?'₹50 off min ₹200':code==='FESTIVE15'?'15% off min ₹500':code==='FREESHIP'?'₹40 off min ₹300':'10% off min ₹1000'}</p>
+          </div>`).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function openCreateCouponModal(){
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-8 w-full max-w-md pop-in bg-[#070b22]/95 relative z-50">
+        <div class="flex justify-between items-center mb-5">
+          <div>
+            <h3 class="text-xl font-bold text-white">🎟️ Create Coupon Code</h3>
+            <p class="text-xs text-white/50">Discount code visible to your customers at checkout</p>
+          </div>
+          <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+        </div>
+
+        <form id="createCouponForm" class="space-y-4">
+          <div>
+            <label class="block text-xs text-white/60 mb-1">Coupon Code</label>
+            <input id="cpnCode" required type="text" placeholder="e.g. SUMMER30" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white uppercase font-mono focus:outline-none focus:border-cyan-400" />
+            <p class="text-[10px] text-white/40 mt-1">Will be auto-uppercased. Minimum 3 characters.</p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-white/60 mb-1">Discount Type</label>
+              <select id="cpnType" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400 cursor-pointer">
+                <option value="percent" class="bg-[#050816]">Percentage (%) Off</option>
+                <option value="flat" class="bg-[#050816]">Flat Amount (₹) Off</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-white/60 mb-1" id="cpnValueLabel">Discount Value (%)</label>
+              <input id="cpnValue" required type="number" min="1" step="0.01" placeholder="15" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs text-white/60 mb-1">Minimum Order Amount (₹)</label>
+            <input id="cpnMinOrder" type="number" min="0" step="1" value="0" placeholder="0" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+            <p class="text-[10px] text-white/40 mt-1">Set 0 to allow any order size.</p>
+          </div>
+
+          <div class="pt-3 flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="btn-neon text-xs font-semibold px-5 py-2.5 cursor-pointer">Create Coupon 🎟️</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById('cpnType').onchange = (e)=>{
+    document.getElementById('cpnValueLabel').textContent = e.target.value === 'percent' ? 'Discount Value (%)' : 'Discount Value (₹)';
+  };
+
+  document.getElementById('createCouponForm').onsubmit = async(e)=>{
+    e.preventDefault();
+    const code = document.getElementById('cpnCode').value;
+    const discount_type = document.getElementById('cpnType').value;
+    const discount_value = parseFloat(document.getElementById('cpnValue').value);
+    const min_order = parseFloat(document.getElementById('cpnMinOrder').value) || 0;
+    try{
+      const created = await api('/api/coupons', {
+        method: 'POST',
+        body: JSON.stringify({code, discount_type, discount_value, min_order})
+      });
+      toast(`Coupon '${created.code}' created!`, 'success');
+      closeModal();
+      await renderSellerCoupons();
+    }catch(err){ toast('Failed: '+err.message, 'error'); }
+  };
+}
+
+async function deleteCoupon(couponId, code){
+  if(!confirm(`Delete coupon '${code}'? This cannot be undone.`)) return;
+  try{
+    await api(`/api/coupons/${couponId}`, {method: 'DELETE'});
+    toast(`Coupon '${code}' deleted`, 'info');
+    await renderSellerCoupons();
+  }catch(e){ toast('Delete failed: '+e.message, 'error'); }
+}
+
+/* ================= TAX INVOICE & SHIPPING LABEL MODAL ================= */
+async function openInvoiceModal(orderId){
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `<div class="modal-backdrop flex items-center justify-center p-4"><div class="glass p-6 text-center text-white/60 text-sm">Loading invoice data...</div></div>`;
+
+  let inv;
+  try{
+    inv = await api(`/api/orders/${orderId}/invoice-data`);
+  }catch(e){
+    toast('Invoice load failed: '+e.message, 'error');
+    closeModal();
+    return;
+  }
+
+  const o = inv.order;
+  const f = inv.financials;
+  const seller = inv.seller;
+  const customer = inv.customer;
+  const dateStr = o.created_at.replace('T',' ').slice(0,16);
+
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4" onclick="event.target===this&&closeModal()">
+      <div class="glass glow-border w-full max-w-3xl pop-in bg-[#070b22]/98 relative z-50 overflow-hidden">
+        <!-- Modal Header -->
+        <div class="flex justify-between items-center px-6 py-4 border-b border-white/10">
+          <h3 class="text-lg font-bold text-white flex items-center gap-2">
+            <span>📄 Tax Invoice & Shipping Label</span>
+            <span class="text-xs font-mono text-cyan-300 px-2 py-0.5 bg-cyan-500/10 rounded-md border border-cyan-500/20">#${o.id}</span>
+          </h3>
+          <div class="flex items-center gap-2">
+            <button onclick="printSection('invoice-tab')" class="text-[11px] px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 cursor-pointer font-semibold flex items-center gap-1">🖨️ Print Invoice</button>
+            <button onclick="printSection('shipping-tab')" class="text-[11px] px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 cursor-pointer font-semibold flex items-center gap-1">📦 Print Label</button>
+            <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1 ml-1">✕</button>
+          </div>
+        </div>
+
+        <!-- Tab Switcher -->
+        <div class="flex gap-0 border-b border-white/10">
+          <button id="invTabBtn" onclick="switchInvTab('invoice')" class="px-6 py-3 text-xs font-semibold text-cyan-300 border-b-2 border-cyan-400 cursor-pointer">📄 Tax Invoice</button>
+          <button id="shipTabBtn" onclick="switchInvTab('shipping')" class="px-6 py-3 text-xs font-semibold text-white/50 border-b-2 border-transparent hover:text-white cursor-pointer">📦 Shipping Label</button>
+        </div>
+
+        <div class="p-6 overflow-y-auto max-h-[70vh] scrollbar-thin">
+          <!-- ===== TAX INVOICE ===== -->
+          <div id="invoice-tab">
+            <div id="printableDoc" class="bg-white text-gray-900 rounded-xl p-6 font-sans text-sm">
+              <!-- Invoice Header -->
+              <div class="flex justify-between items-start mb-6">
+                <div>
+                  <h1 class="text-2xl font-extrabold text-gray-900">TAX INVOICE</h1>
+                  <p class="text-xs text-gray-500 mt-0.5">GST Invoice with CGST + SGST Breakup</p>
+                </div>
+                <div class="text-right">
+                  <div class="text-2xl font-black text-indigo-700">⚡ OrderFlow AI</div>
+                  <p class="text-[11px] text-gray-500">Multi-Seller E-Commerce Platform</p>
+                  <p class="text-[11px] text-gray-500">GSTIN: ${inv.tax_identifier}</p>
+                  <p class="text-[11px] text-gray-500">State Code: ${inv.state_code}</p>
+                </div>
+              </div>
+
+              <!-- Invoice Metadata -->
+              <div class="grid grid-cols-3 gap-4 mb-5 p-4 bg-gray-50 rounded-xl text-xs">
+                <div><p class="font-semibold text-gray-500">Invoice No.</p><p class="font-bold text-gray-900 font-mono">${inv.invoice_number}</p></div>
+                <div><p class="font-semibold text-gray-500">Order Date</p><p class="font-bold text-gray-900">${dateStr}</p></div>
+                <div><p class="font-semibold text-gray-500">Payment</p><p class="font-bold text-gray-900">${o.payment_method} · ${o.payment_status}</p></div>
+              </div>
+
+              <!-- Parties -->
+              <div class="grid grid-cols-2 gap-4 mb-5">
+                <div class="p-4 border border-gray-200 rounded-xl text-xs">
+                  <p class="font-bold text-gray-700 mb-2 text-[11px] uppercase tracking-wider">Seller (Vendor)</p>
+                  <p class="font-bold text-gray-900 text-base">${seller.name}</p>
+                  <p class="text-gray-600">Seller ID: #${seller.id}</p>
+                  <p class="text-gray-600">${seller.email}</p>
+                  <p class="text-gray-600 mt-1">HSN/SAC: ${inv.hsn_sac}</p>
+                </div>
+                <div class="p-4 border border-gray-200 rounded-xl text-xs">
+                  <p class="font-bold text-gray-700 mb-2 text-[11px] uppercase tracking-wider">Bill To (Customer)</p>
+                  <p class="font-bold text-gray-900 text-base">${customer.name}</p>
+                  <p class="text-gray-600">Customer ID: #${customer.id}</p>
+                  <p class="text-gray-600">${customer.email}</p>
+                  <p class="text-gray-600 mt-1 leading-relaxed">${o.shipping_address || 'Address on file'}</p>
+                </div>
+              </div>
+
+              <!-- Items Table -->
+              <table class="w-full mb-5 text-xs border-collapse">
+                <thead>
+                  <tr class="bg-indigo-700 text-white">
+                    <th class="py-2.5 px-3 text-left rounded-tl-lg">Item</th>
+                    <th class="py-2.5 px-3 text-center">Qty</th>
+                    <th class="py-2.5 px-3 text-right">Unit Price</th>
+                    <th class="py-2.5 px-3 text-right rounded-tr-lg">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${o.items.map((item,i)=>`
+                    <tr class="${i%2===0?'bg-white':'bg-gray-50'}">
+                      <td class="py-2.5 px-3 border-b border-gray-100 font-medium">${item.name}</td>
+                      <td class="py-2.5 px-3 border-b border-gray-100 text-center">${item.qty}</td>
+                      <td class="py-2.5 px-3 border-b border-gray-100 text-right">₹${item.price.toLocaleString()}</td>
+                      <td class="py-2.5 px-3 border-b border-gray-100 text-right font-semibold">₹${(item.price*item.qty).toLocaleString()}</td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+
+              <!-- Financial Summary -->
+              <div class="flex justify-end">
+                <div class="w-72 text-xs space-y-1.5">
+                  <div class="flex justify-between"><span class="text-gray-600">Subtotal</span><span class="font-medium">₹${f.subtotal.toLocaleString()}</span></div>
+                  ${f.discount > 0 ? `<div class="flex justify-between text-green-700"><span>Coupon Discount (${o.coupon_code})</span><span class="font-medium">-₹${f.discount.toLocaleString()}</span></div>` : ''}
+                  <div class="flex justify-between"><span class="text-gray-600">Taxable Value</span><span>₹${f.taxable_value.toLocaleString()}</span></div>
+                  <div class="flex justify-between"><span class="text-gray-600">CGST (9%)</span><span>₹${f.cgst.toLocaleString()}</span></div>
+                  <div class="flex justify-between"><span class="text-gray-600">SGST (9%)</span><span>₹${f.sgst.toLocaleString()}</span></div>
+                  <div class="flex justify-between"><span class="text-gray-600">Delivery Charges</span><span class="text-green-700 font-semibold">FREE</span></div>
+                  <div class="flex justify-between font-bold text-base border-t border-gray-300 pt-2 mt-2">
+                    <span>Grand Total</span>
+                    <span class="text-indigo-700 text-lg">₹${f.grand_total.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Footer -->
+              <div class="mt-6 pt-4 border-t border-gray-200 text-center text-[10px] text-gray-400">
+                <p>This is a computer-generated invoice. No signature required.</p>
+                <p class="mt-0.5">OrderFlow AI Multi-Seller Platform · support@orderflow.ai · GSTIN: ${inv.tax_identifier}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== SHIPPING LABEL ===== -->
+          <div id="shipping-tab" class="hidden">
+            <div id="printableDoc" class="bg-white text-gray-900 rounded-xl p-6 font-sans">
+              <!-- Label Header -->
+              <div class="border-4 border-gray-900 rounded-2xl p-5">
+                <div class="flex justify-between items-center mb-4 pb-3 border-b-2 border-gray-900">
+                  <div class="text-2xl font-black text-gray-900">⚡ OrderFlow AI</div>
+                  <div class="text-right">
+                    <p class="text-[11px] font-bold text-gray-600 uppercase tracking-widest">Shipping Label</p>
+                    <p class="font-mono font-extrabold text-xl text-gray-900">#${o.id}</p>
+                  </div>
+                </div>
+
+                <!-- Barcodes Row -->
+                <div class="flex justify-between items-center mb-4">
+                  <div>
+                    <p class="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Order Barcode</p>
+                    <svg width="180" height="45" viewBox="0 0 180 45">
+                      ${Array.from({length:60},(_,i)=>`<rect x="${i*3}" y="0" width="${[1,2,3,2,1][i%5]}" height="45" fill="${i%7===0?'#fff':'#111'}"/>` ).join('')}
+                    </svg>
+                    <p class="font-mono text-[10px] text-gray-700 mt-1">${inv.invoice_number}</p>
+                  </div>
+                  <!-- QR Code Simulation -->
+                  <svg width="72" height="72" viewBox="0 0 100 100">
+                    <rect width="100" height="100" fill="#fff"/>
+                    <rect x="5" y="5" width="28" height="28" fill="#000"/><rect x="9" y="9" width="20" height="20" fill="#fff"/><rect x="13" y="13" width="12" height="12" fill="#000"/>
+                    <rect x="67" y="5" width="28" height="28" fill="#000"/><rect x="71" y="9" width="20" height="20" fill="#fff"/><rect x="75" y="13" width="12" height="12" fill="#000"/>
+                    <rect x="5" y="67" width="28" height="28" fill="#000"/><rect x="9" y="71" width="20" height="20" fill="#fff"/><rect x="13" y="75" width="12" height="12" fill="#000"/>
+                    <rect x="38" y="38" width="24" height="24" fill="#000"/><rect x="44" y="44" width="12" height="12" fill="#fff"/>
+                    <rect x="38" y="12" width="6" height="6" fill="#000"/><rect x="70" y="40" width="8" height="8" fill="#000"/>
+                    <rect x="40" y="75" width="14" height="6" fill="#000"/><rect x="58" y="68" width="6" height="12" fill="#000"/>
+                  </svg>
+                </div>
+
+                <!-- From / To -->
+                <div class="grid grid-cols-2 gap-4 mb-3">
+                  <div class="p-3 bg-gray-50 rounded-xl border border-gray-200">
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1.5">FROM (Seller)</p>
+                    <p class="font-bold text-sm text-gray-900">${seller.name}</p>
+                    <p class="text-xs text-gray-600">ID: #${seller.id}</p>
+                    <p class="text-xs text-gray-600">${seller.email}</p>
+                    <p class="text-xs text-gray-500 mt-1">Powered by OrderFlow AI</p>
+                  </div>
+                  <div class="p-3 bg-indigo-50 rounded-xl border-2 border-indigo-400">
+                    <p class="text-[10px] font-bold uppercase tracking-widest text-indigo-600 mb-1.5">DELIVER TO (Customer)</p>
+                    <p class="font-extrabold text-base text-gray-900">${customer.name}</p>
+                    <p class="text-xs text-gray-600">Ph: ${o.shipping_address.includes('Ph:') ? o.shipping_address.split('Ph:')[1].trim() : 'On file'}</p>
+                    <p class="text-xs text-gray-700 font-medium mt-1 leading-relaxed">${o.shipping_address || 'Address registered'}</p>
+                  </div>
+                </div>
+
+                <!-- Order Summary -->
+                <div class="p-3 bg-gray-50 rounded-xl text-xs border border-gray-200">
+                  <div class="grid grid-cols-3 gap-2">
+                    <div><span class="text-gray-500">Items:</span> <span class="font-bold">${o.items.map(i=>i.name+' x'+i.qty).join(', ')}</span></div>
+                    <div><span class="text-gray-500">Payment:</span> <span class="font-bold">${o.payment_method} (${o.payment_status})</span></div>
+                    <div><span class="text-gray-500">Amount:</span> <span class="font-bold text-indigo-700">₹${o.amount.toLocaleString()}</span></div>
+                  </div>
+                </div>
+
+                <!-- Handle with Care -->
+                <div class="mt-3 p-2 border-2 border-dashed border-gray-400 rounded-lg text-center">
+                  <p class="text-[11px] font-extrabold text-gray-700 tracking-widest uppercase">📦 Handle with Care · Fragile Contents Possible</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function switchInvTab(tab){
+  document.getElementById('invoice-tab').classList.toggle('hidden', tab!=='invoice');
+  document.getElementById('shipping-tab').classList.toggle('hidden', tab!=='shipping');
+  document.getElementById('invTabBtn').className = `px-6 py-3 text-xs font-semibold cursor-pointer border-b-2 ${ tab==='invoice' ? 'text-cyan-300 border-cyan-400' : 'text-white/50 border-transparent hover:text-white' }`;
+  document.getElementById('shipTabBtn').className = `px-6 py-3 text-xs font-semibold cursor-pointer border-b-2 ${ tab==='shipping' ? 'text-purple-300 border-purple-400' : 'text-white/50 border-transparent hover:text-white' }`;
+}
+
+function printSection(tabId){
+  switchInvTab(tabId === 'invoice-tab' ? 'invoice' : 'shipping');
+  setTimeout(()=>window.print(), 200);
+}
+
+/* ================= REAL-TIME ORDER CHAT DRAWER ================= */
+async function openChatDrawer(orderId){
+  const order = state.orders.find(o=>o.id===orderId);
+  state.activeChatOrderId = orderId;
+  state.activeChatOrder = order || {id: orderId};
+
+  let messages = [];
+  try{ messages = await api(`/api/orders/${orderId}/messages`); }catch(e){}
+  state.chatMessages = messages;
+
+  const drawer = document.getElementById('chatDrawer');
+  const other = state.role === 'customer' ? (order?.seller_name || 'Seller') : (order?.customer_name || 'Customer');
+  const otherIcon = state.role === 'customer' ? '🏪' : '👤';
+
+  drawer.innerHTML = `
+    <div class="glass glow-border h-full p-4 flex flex-col pop-in bg-[#070b22]/98 border-purple-400/40 overflow-hidden">
+      <!-- Header -->
+      <div class="flex justify-between items-center pb-3 mb-3 border-b border-white/10 shrink-0">
+        <div>
+          <h3 class="font-bold text-base text-white flex items-center gap-2">
+            <span>💬 Order Chat</span>
+            <span class="text-xs font-mono text-purple-300 px-2 py-0.5 bg-purple-500/10 rounded-md border border-purple-500/20">#${orderId}</span>
+          </h3>
+          <p class="text-[11px] text-white/50 mt-0.5">${otherIcon} ${other}</p>
+        </div>
+        <button onclick="closeChatDrawer()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+      </div>
+
+      <!-- Messages -->
+      <div id="chatMessagesContainer" class="flex-1 overflow-y-auto scrollbar-thin space-y-3 pr-1 pb-2"></div>
+
+      <!-- Input -->
+      <div class="pt-3 border-t border-white/10 shrink-0">
+        <div class="flex gap-2">
+          <input id="chatInput" type="text" placeholder="Type a message..." maxlength="500"
+            class="flex-1 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-white/40 focus:outline-none focus:border-purple-400"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}" />
+          <button onclick="sendChatMessage()" class="px-4 py-2.5 rounded-xl text-sm font-bold cursor-pointer flex-shrink-0" style="background:linear-gradient(120deg,#7C3AED,#4338CA);color:#fff;">Send ↗</button>
+        </div>
+        <p class="text-[10px] text-white/30 mt-1.5">Messages are delivered in real-time to both parties</p>
+      </div>
+    </div>`;
+
+  drawer.style.transform = 'translateX(0)';
+  drawer.dataset.open = 'true';
+  renderChatMessages();
+}
+
+function closeChatDrawer(){
+  const drawer = document.getElementById('chatDrawer');
+  drawer.style.transform = 'translateX(100%)';
+  drawer.dataset.open = 'false';
+  state.activeChatOrderId = null;
+  state.activeChatOrder = null;
+}
+
+function renderChatMessages(){
+  const container = document.getElementById('chatMessagesContainer');
+  if(!container) return;
+
+  if(state.chatMessages.length === 0){
+    container.innerHTML = `
+      <div class="flex flex-col items-center justify-center h-full text-center py-10">
+        <span class="text-4xl mb-2">💬</span>
+        <p class="text-sm font-bold text-white">Start the conversation</p>
+        <p class="text-xs text-white/50 mt-1">Ask about order status, delivery, or anything else</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = state.chatMessages.map(msg=>{
+    const isMine = msg.sender_id === state.user.id;
+    const time = msg.timestamp.replace('T',' ').slice(11,16);
+    const roleIcon = msg.sender_role === 'seller' ? '🏪' : '👤';
+    return `
+      <div class="flex ${isMine ? 'justify-end' : 'justify-start'}">
+        <div class="max-w-[80%] ${isMine ? 'items-end' : 'items-start'} flex flex-col gap-0.5">
+          ${!isMine ? `<span class="text-[10px] text-white/40 ml-1">${roleIcon} ${msg.sender_name}</span>` : ''}
+          <div class="px-3.5 py-2.5 rounded-2xl text-sm ${isMine
+            ? 'rounded-tr-sm text-white' 
+            : 'rounded-tl-sm text-white/90 bg-white/10 border border-white/10'
+          }" style="${isMine ? 'background:linear-gradient(120deg,#7C3AED,#4338CA)' : ''}">
+            ${msg.message}
+          </div>
+          <span class="text-[9px] text-white/30 ${isMine ? 'text-right mr-1' : 'ml-1'}">${time}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendChatMessage(){
+  const input = document.getElementById('chatInput');
+  if(!input) return;
+  const text = input.value.trim();
+  if(!text || !state.activeChatOrderId) return;
+
+  input.value = '';
+  try{
+    const msg = await api(`/api/orders/${state.activeChatOrderId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({message: text})
+    });
+    // Locally append (the WebSocket will also push to recipient)
+    state.chatMessages.push(msg);
+    renderChatMessages();
+  }catch(e){ toast('Message failed: '+e.message, 'error'); input.value = text; }
 }
 
 /* ================= MODALS ================= */

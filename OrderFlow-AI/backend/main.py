@@ -106,8 +106,34 @@ def init_db():
             status TEXT,
             eta TEXT,
             delay_reason TEXT DEFAULT '',
+            payment_method TEXT DEFAULT 'UPI',
+            payment_status TEXT DEFAULT 'Paid',
+            coupon_code TEXT DEFAULT '',
+            discount_amount REAL DEFAULT 0.0,
+            shipping_address TEXT DEFAULT '',
             created_at TEXT,
             updated_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS coupons (
+            id TEXT PRIMARY KEY,
+            code TEXT UNIQUE,
+            discount_type TEXT,
+            discount_value REAL,
+            min_order REAL,
+            seller_id TEXT DEFAULT 'all',
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS order_messages (
+            id TEXT PRIMARY KEY,
+            order_id TEXT,
+            sender_id TEXT,
+            sender_name TEXT,
+            sender_role TEXT,
+            message TEXT,
+            timestamp TEXT
         );
         """
     )
@@ -130,6 +156,16 @@ def init_db():
         conn.execute("ALTER TABLE orders ADD COLUMN delay_reason TEXT DEFAULT ''")
     if "seller_name" not in ocols:
         conn.execute("ALTER TABLE orders ADD COLUMN seller_name TEXT DEFAULT ''")
+    if "payment_method" not in ocols:
+        conn.execute("ALTER TABLE orders ADD COLUMN payment_method TEXT DEFAULT 'UPI'")
+    if "payment_status" not in ocols:
+        conn.execute("ALTER TABLE orders ADD COLUMN payment_status TEXT DEFAULT 'Paid'")
+    if "coupon_code" not in ocols:
+        conn.execute("ALTER TABLE orders ADD COLUMN coupon_code TEXT DEFAULT ''")
+    if "discount_amount" not in ocols:
+        conn.execute("ALTER TABLE orders ADD COLUMN discount_amount REAL DEFAULT 0.0")
+    if "shipping_address" not in ocols:
+        conn.execute("ALTER TABLE orders ADD COLUMN shipping_address TEXT DEFAULT ''")
 
     # Seed default 7-digit Sellers & Customers
     default_users = [
@@ -176,6 +212,21 @@ def init_db():
                     "UPDATE products SET seller_name=?, icon=? WHERE id=?",
                     (sname, icon, existing["id"]),
                 )
+
+    # Seed default coupons
+    default_coupons = [
+        ("COUP-W50", "WELCOME50", "flat", 50.0, 200.0, "all"),
+        ("COUP-F15", "FESTIVE15", "percent", 15.0, 500.0, "all"),
+        ("COUP-FS", "FREESHIP", "flat", 40.0, 300.0, "all"),
+        ("COUP-TECH", "TECH10", "percent", 10.0, 1000.0, "1001001"),
+    ]
+    for cid, code, dtype, dval, min_ord, sid in default_coupons:
+        c_exist = conn.execute("SELECT id FROM coupons WHERE code=?", (code,)).fetchone()
+        if not c_exist:
+            conn.execute(
+                "INSERT INTO coupons (id, code, discount_type, discount_value, min_order, seller_id, is_active, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (cid, code, dtype, dval, min_ord, sid, 1, datetime.utcnow().isoformat())
+            )
 
     conn.commit()
     conn.close()
@@ -488,6 +539,10 @@ class OrderItem(BaseModel):
 class NewOrder(BaseModel):
     items: list[OrderItem]
     seller_id: Optional[str] = None
+    payment_method: Optional[str] = "UPI"
+    shipping_address: Optional[str] = "Standard Customer Address"
+    coupon_code: Optional[str] = ""
+    discount_amount: Optional[float] = 0.0
 
 
 STATUS_FLOW = ["Placed", "Processing", "Delayed", "Completed"]
@@ -532,11 +587,27 @@ async def create_order(body: NewOrder, user=Depends(get_current_user)):
     created_orders = []
     updated_products = []
 
+    # Calculate overall cart total to prorate coupon discount across sellers
+    raw_cart_total = sum(item.price * item.qty for item in body.items)
+    total_discount = max(0.0, float(body.discount_amount or 0.0))
+    p_method = (body.payment_method or "UPI").strip()
+    p_status = "Pending COD" if p_method.upper() == "COD" else "Paid"
+    s_addr = (body.shipping_address or "Standard Shipping Address").strip()
+    c_code = (body.coupon_code or "").strip().upper()
+
     # 3. Create a separate order per seller so each seller only receives & fulfills their own items!
     for sid, group in seller_groups.items():
         s_items = group["items"]
         s_name = group["seller_name"]
-        order_amount = sum(item.price * item.qty for item, _ in s_items)
+        s_raw_amount = sum(item.price * item.qty for item, _ in s_items)
+
+        # Prorate discount for this seller
+        if total_discount > 0 and raw_cart_total > 0:
+            s_discount = round((s_raw_amount / raw_cart_total) * total_discount, 2)
+        else:
+            s_discount = 0.0
+
+        order_amount = max(0.0, round(s_raw_amount - s_discount, 2))
         order_id = str(uuid.uuid4())[:8].upper()
         eta = (datetime.utcnow() + timedelta(minutes=45)).strftime("%H:%M")
 
@@ -559,13 +630,24 @@ async def create_order(body: NewOrder, user=Depends(get_current_user)):
             "status": "Placed",
             "eta": eta,
             "delay_reason": "",
+            "payment_method": p_method,
+            "payment_status": p_status,
+            "coupon_code": c_code if s_discount > 0 else "",
+            "discount_amount": s_discount,
+            "shipping_address": s_addr,
             "created_at": now,
             "updated_at": now,
         }
 
         conn.execute(
-            "INSERT INTO orders (id, customer_id, customer_name, seller_id, seller_name, items, amount, status, eta, delay_reason, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (order_id, user["sub"], user["name"], sid, s_name, json.dumps(serialized_items), order_amount, "Placed", eta, "", now, now),
+            """INSERT INTO orders (
+                id, customer_id, customer_name, seller_id, seller_name, items, amount, status, eta, delay_reason,
+                payment_method, payment_status, coupon_code, discount_amount, shipping_address, created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                order_id, user["sub"], user["name"], sid, s_name, json.dumps(serialized_items), order_amount, "Placed", eta, "",
+                p_method, p_status, c_code if s_discount > 0 else "", s_discount, s_addr, now, now
+            ),
         )
         created_orders.append(order)
 
@@ -745,6 +827,265 @@ async def delay_order(order_id: str, body: DelayOrderBody, user=Depends(get_curr
     await manager.send_user(updated["customer_id"], {"type": "status_update", "order": updated})
     await manager.send_user(updated["seller_id"], {"type": "status_update", "order": updated})
     return updated
+
+
+# ---------------------------------------------------------------- payment acceptance
+
+@app.post("/api/orders/{order_id}/accept-payment")
+async def accept_payment(order_id: str, user=Depends(get_current_user)):
+    if user["role"] != "seller":
+        raise HTTPException(403, "Only sellers can accept or verify payment")
+    conn = db()
+    row = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "Order not found")
+
+    order = dict(row)
+    if order["seller_id"] != user["sub"]:
+        conn.close()
+        raise HTTPException(403, "You can only manage payments for your own store's orders")
+
+    now = datetime.utcnow().isoformat()
+    new_status = "Paid (Verified by Seller)"
+    conn.execute("UPDATE orders SET payment_status=?, updated_at=? WHERE id=?", (new_status, now, order_id))
+    conn.commit()
+    updated = dict(conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone())
+    updated["items"] = json.loads(updated["items"])
+    conn.close()
+
+    # Real-time push to customer & seller
+    await manager.send_user(updated["customer_id"], {"type": "payment_update", "order": updated})
+    await manager.send_user(updated["seller_id"], {"type": "payment_update", "order": updated})
+    return updated
+
+
+# ---------------------------------------------------------------- tax invoice & labels
+
+@app.get("/api/orders/{order_id}/invoice-data")
+def get_invoice_data(order_id: str, user=Depends(get_current_user)):
+    conn = db()
+    row = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "Order not found")
+    order = dict(row)
+    if user["role"] == "seller" and order["seller_id"] != user["sub"]:
+        conn.close()
+        raise HTTPException(403, "Access denied")
+    if user["role"] == "customer" and order["customer_id"] != user["sub"]:
+        conn.close()
+        raise HTTPException(403, "Access denied")
+
+    seller_row = conn.execute("SELECT id, name, email FROM users WHERE id=?", (order["seller_id"],)).fetchone()
+    customer_row = conn.execute("SELECT id, name, email FROM users WHERE id=?", (order["customer_id"],)).fetchone()
+    conn.close()
+
+    order["items"] = json.loads(order["items"])
+    seller = dict(seller_row) if seller_row else {"id": order["seller_id"], "name": order["seller_name"], "email": f"{order['seller_id']}@seller.orderflow.ai"}
+    customer = dict(customer_row) if customer_row else {"id": order["customer_id"], "name": order["customer_name"], "email": f"{order['customer_id']}@customer.orderflow.ai"}
+
+    subtotal = sum(i["price"] * i["qty"] for i in order["items"])
+    discount = float(order.get("discount_amount") or 0.0)
+    net_after_discount = max(0.0, subtotal - discount)
+    gst_rate = 18.0
+    taxable_val = round(net_after_discount / (1 + gst_rate / 100), 2)
+    gst_amt = round(net_after_discount - taxable_val, 2)
+    cgst = round(gst_amt / 2, 2)
+    sgst = round(gst_amt / 2, 2)
+
+    return {
+        "invoice_number": f"INV-{order['created_at'][:10].replace('-', '')}-{order['id']}",
+        "order": order,
+        "seller": seller,
+        "customer": customer,
+        "financials": {
+            "subtotal": subtotal,
+            "discount": discount,
+            "taxable_value": taxable_val,
+            "cgst": cgst,
+            "sgst": sgst,
+            "gst_total": gst_amt,
+            "grand_total": order["amount"],
+        },
+        "tax_identifier": f"29AAACT{order['seller_id']}Z5",
+        "hsn_sac": "8518 / 9405 / 9506",
+        "state_code": "KA-29",
+    }
+
+
+# ---------------------------------------------------------------- order chat (customer <-> seller)
+
+class SendMessageBody(BaseModel):
+    message: str
+
+
+@app.get("/api/orders/{order_id}/messages")
+def get_order_messages(order_id: str, user=Depends(get_current_user)):
+    conn = db()
+    order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+    if not order:
+        conn.close()
+        raise HTTPException(404, "Order not found")
+    if user["role"] == "seller" and order["seller_id"] != user["sub"]:
+        conn.close()
+        raise HTTPException(403, "Access denied")
+    if user["role"] == "customer" and order["customer_id"] != user["sub"]:
+        conn.close()
+        raise HTTPException(403, "Access denied")
+
+    rows = conn.execute("SELECT * FROM order_messages WHERE order_id=? ORDER BY timestamp ASC", (order_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/orders/{order_id}/messages")
+async def send_order_message(order_id: str, body: SendMessageBody, user=Depends(get_current_user)):
+    clean_text = body.message.strip()
+    if not clean_text:
+        raise HTTPException(400, "Message cannot be empty")
+
+    conn = db()
+    order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+    if not order:
+        conn.close()
+        raise HTTPException(404, "Order not found")
+    if user["role"] == "seller" and order["seller_id"] != user["sub"]:
+        conn.close()
+        raise HTTPException(403, "Access denied")
+    if user["role"] == "customer" and order["customer_id"] != user["sub"]:
+        conn.close()
+        raise HTTPException(403, "Access denied")
+
+    mid = str(uuid.uuid4())[:8].upper()
+    now = datetime.utcnow().isoformat()
+    msg_obj = {
+        "id": mid,
+        "order_id": order_id,
+        "sender_id": user["sub"],
+        "sender_name": user["name"],
+        "sender_role": user["role"],
+        "message": clean_text,
+        "timestamp": now,
+    }
+    conn.execute(
+        "INSERT INTO order_messages (id, order_id, sender_id, sender_name, sender_role, message, timestamp) VALUES (?,?,?,?,?,?,?)",
+        (mid, order_id, user["sub"], user["name"], user["role"], clean_text, now),
+    )
+    conn.commit()
+    conn.close()
+
+    # Real-time WebSocket delivery to both parties
+    recipient_id = order["seller_id"] if user["role"] == "customer" else order["customer_id"]
+    await manager.send_user(recipient_id, {"type": "chat_message", "message": msg_obj})
+    await manager.send_user(user["sub"], {"type": "chat_message", "message": msg_obj})
+    return msg_obj
+
+
+# ---------------------------------------------------------------- coupons
+
+class CreateCouponBody(BaseModel):
+    code: str
+    discount_type: str = "percent"  # "percent" or "flat"
+    discount_value: float
+    min_order: float = 0.0
+
+
+class ValidateCouponBody(BaseModel):
+    code: str
+    order_amount: float
+
+
+@app.get("/api/coupons")
+def list_coupons(user=Depends(get_current_user)):
+    conn = db()
+    if user["role"] == "seller":
+        rows = conn.execute("SELECT * FROM coupons WHERE seller_id=? OR seller_id='all' ORDER BY created_at DESC", (user["sub"],)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM coupons WHERE is_active=1 ORDER BY created_at DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/coupons")
+def create_coupon(body: CreateCouponBody, user=Depends(get_current_user)):
+    if user["role"] != "seller":
+        raise HTTPException(403, "Only sellers can create discount coupons")
+    clean_code = body.code.strip().upper()
+    if len(clean_code) < 3:
+        raise HTTPException(400, "Coupon code must be at least 3 characters")
+    if body.discount_value <= 0:
+        raise HTTPException(400, "Discount value must be greater than 0")
+    if body.discount_type == "percent" and body.discount_value > 90:
+        raise HTTPException(400, "Percentage discount cannot exceed 90%")
+    if body.discount_type not in ("percent", "flat"):
+        raise HTTPException(400, "discount_type must be either 'percent' or 'flat'")
+
+    conn = db()
+    existing = conn.execute("SELECT 1 FROM coupons WHERE code=?", (clean_code,)).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(400, f"Coupon code '{clean_code}' already exists")
+
+    cid = str(uuid.uuid4())[:8].upper()
+    now = datetime.utcnow().isoformat()
+    conn.execute(
+        "INSERT INTO coupons (id, code, discount_type, discount_value, min_order, seller_id, is_active, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (cid, clean_code, body.discount_type, body.discount_value, max(0.0, body.min_order), user["sub"], 1, now),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM coupons WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+@app.delete("/api/coupons/{coupon_id}")
+def delete_coupon(coupon_id: str, user=Depends(get_current_user)):
+    if user["role"] != "seller":
+        raise HTTPException(403, "Only sellers can delete coupons")
+    conn = db()
+    row = conn.execute("SELECT * FROM coupons WHERE id=?", (coupon_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "Coupon not found")
+    if row["seller_id"] != user["sub"] and row["seller_id"] != "all":
+        conn.close()
+        raise HTTPException(403, "You can only delete coupons created by your store")
+
+    conn.execute("DELETE FROM coupons WHERE id=?", (coupon_id,))
+    conn.commit()
+    conn.close()
+    return {"success": True, "coupon_id": coupon_id}
+
+
+@app.post("/api/coupons/validate")
+def validate_coupon(body: ValidateCouponBody):
+    clean_code = body.code.strip().upper()
+    conn = db()
+    row = conn.execute("SELECT * FROM coupons WHERE code=? AND is_active=1", (clean_code,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404, f"Invalid or expired promo code '{clean_code}'")
+
+    coupon = dict(row)
+    if body.order_amount < coupon["min_order"]:
+        raise HTTPException(400, f"Code '{clean_code}' requires a minimum order of ₹{coupon['min_order']:.2f}")
+
+    if coupon["discount_type"] == "percent":
+        discount = round((body.order_amount * coupon["discount_value"]) / 100.0, 2)
+    else:
+        discount = min(coupon["discount_value"], body.order_amount)
+
+    final_amount = max(0.0, round(body.order_amount - discount, 2))
+    return {
+        "valid": True,
+        "code": clean_code,
+        "discount_type": coupon["discount_type"],
+        "discount_value": coupon["discount_value"],
+        "discount_amount": discount,
+        "final_amount": final_amount,
+        "message": f"Coupon '{clean_code}' applied! You saved ₹{discount:.2f}"
+    }
 
 
 # ---------------------------------------------------------------- analytics
