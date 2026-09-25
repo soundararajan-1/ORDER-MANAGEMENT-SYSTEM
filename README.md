@@ -46,6 +46,12 @@ New sellers must provide full KYC onboarding information before they can list pr
 - **Dark & Light Mode Switcher**: Smooth theme transitions with persisted preferences in `localStorage`.
 - **Seller Storefront Branding**: Sellers can customize their brand color, logo, and banner URL in real time.
 
+### 6. 🔐 Password Self-Service & Admin User Deletion
+- **Change Password**: Any logged-in Customer, Seller, or Admin can update their password via the `🔑 Password` modal on the top navigation bar.
+- **Forgot Password Recovery**: Secure self-service recovery directly from the login screen verifying registered **Birth Place** or **Favorite Person** security answers (with case-insensitive matching).
+- **Show/Hide Password Visibility Toggles**: Interactive eye toggles (`👁️`) available across all sign-in, registration, reset, and password modification forms.
+- **Admin User ID Removal**: Administrators can permanently delete user IDs for Customers, Sellers, or Junior Admins with immediate session revocation. The Master Founder Admin (`956673`) is immutably protected from deletion or suspension.
+
 ---
 
 ## 🔑 Test Accounts & Demo Access

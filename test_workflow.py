@@ -190,5 +190,106 @@ if orders:
         pdf_bytes = pdf_resp.read()
         print(f"PDF Invoice for order {sample_order_id}: {pdf_resp.status} OK ({len(pdf_bytes)} bytes, starts with {pdf_bytes[:4]})")
 
-print("\n🎉 ALL ADMIN GOVERNANCE, SELLER KYC, SUPPORT, AND PWA FLOWS VERIFIED SUCCESSFULLY!")
+print("\n=== 14. TEST CHANGE PASSWORD (ANY USER) ===")
+# Customer changes password
+status, cpw_resp = req(f"{base}/api/auth/change-password", "POST", {
+    "current_password": "customer123",
+    "new_password": "CustomerNewPass@2026"
+}, token=cust_token)
+print("Change password response (Expected 200):", status, cpw_resp.get("detail") or cpw_resp.get("message"))
+assert status == 200
+
+# Try login with old password -> should fail (401)
+status, old_res = req(f"{base}/api/auth/login", "POST", {
+    "id": "7001001",
+    "password": "customer123",
+    "role": "customer"
+})
+print("Login with old password (Expected 401):", status)
+assert status == 401
+
+# Revert password back for customer 7001001
+status, log_new = req(f"{base}/api/auth/login", "POST", {
+    "id": "7001001",
+    "password": "CustomerNewPass@2026",
+    "role": "customer"
+})
+assert status == 200
+new_cust_tok = log_new.get("access_token")
+status, rev_resp = req(f"{base}/api/auth/change-password", "POST", {
+    "current_password": "CustomerNewPass@2026",
+    "new_password": "customer123"
+}, token=new_cust_tok)
+assert status == 200
+print("Customer password reverted successfully:", rev_resp.get("detail") or rev_resp.get("message"))
+
+print("\n=== 15. TEST FORGOT PASSWORD WITH SECURITY QUESTIONS ===")
+# Test forgot password with wrong answer
+status, bad_ans = req(f"{base}/api/auth/forgot-password", "POST", {
+    "id": seller_id,
+    "role": "seller",
+    "security_answer": "WrongCity123",
+    "new_password": "VikramNewPass@999"
+})
+print("Forgot password with incorrect answer (Expected 400):", status, bad_ans.get("detail"))
+assert status == 400
+
+# Test forgot password for Vikram using demo fallback / registered answer
+# First set Vikram's recovery answer in db directly to ensure exact match
+cur.execute("UPDATE users SET birth_place='Jaipur', fav_person='Tagore' WHERE id=?", (seller_id,))
+conn.commit()
+
+status, good_ans = req(f"{base}/api/auth/forgot-password", "POST", {
+    "id": seller_id,
+    "role": "seller",
+    "security_answer": "jaipur",
+    "new_password": "VikramNewPass@999"
+})
+print("Forgot password with Birth Place match (Expected 200):", status, good_ans.get("detail") or good_ans.get("message"))
+assert status == 200
+
+# Test login with reset password
+status, vikram_new_log = req(f"{base}/api/auth/login", "POST", {
+    "id": seller_id,
+    "password": "VikramNewPass@999",
+    "role": "seller"
+})
+print("Seller login with reset password (Expected 200):", status)
+assert status == 200
+
+print("\n=== 16. TEST ADMIN DELETE USER & IMMUNITY OF FOUNDER ADMIN ===")
+# 1. Founder admin deletion must be rejected (403)
+status, imm_resp = req(f"{base}/api/admin/users/956673", "DELETE", token=admin_token)
+print("Attempt to delete Founder Admin 956673 (Expected 403 Forbidden):", status, imm_resp.get("detail"))
+assert status == 403
+
+# 2. Admin deletes junior admin (Sarah Jenkins)
+status, del_adm = req(f"{base}/api/admin/users/{junior_admin_id}", "DELETE", token=admin_token)
+print(f"Admin deletes junior admin #{junior_admin_id} (Expected 200):", status, del_adm.get("detail") or del_adm.get("message"))
+assert status == 200
+
+# Verify deleted junior admin cannot login
+status, adm_fail = req(f"{base}/api/auth/login", "POST", {
+    "id": junior_admin_id,
+    "password": "SarahPassword@123",
+    "role": "admin"
+})
+print("Deleted junior admin login (Expected 401):", status)
+assert status == 401
+
+# 3. Admin deletes seller (Vikram Patel)
+status, del_sel = req(f"{base}/api/admin/users/{seller_id}", "DELETE", token=admin_token)
+print(f"Admin deletes seller #{seller_id} (Expected 200):", status, del_sel.get("detail") or del_sel.get("message"))
+assert status == 200
+
+# Verify deleted seller cannot login
+status, sel_fail = req(f"{base}/api/auth/login", "POST", {
+    "id": seller_id,
+    "password": "VikramNewPass@999",
+    "role": "seller"
+})
+print("Deleted seller login (Expected 401):", status)
+assert status == 401
+
+print("\n🎉 ALL ADMIN GOVERNANCE, SELLER KYC, SUPPORT, PASSWORD MGMT & USER DELETION FLOWS VERIFIED SUCCESSFULLY!")
 conn.close()

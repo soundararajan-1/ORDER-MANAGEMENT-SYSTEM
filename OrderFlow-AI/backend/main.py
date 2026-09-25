@@ -169,6 +169,8 @@ def init_db():
             rejection_reason TEXT DEFAULT '',
             verified_at TEXT DEFAULT '',
             created_at TEXT DEFAULT '',
+            birth_place TEXT DEFAULT '',
+            fav_person TEXT DEFAULT '',
             is_first_admin INTEGER DEFAULT 0
         )
     """)
@@ -299,12 +301,21 @@ def init_db():
             ("brand_color", "TEXT DEFAULT '#6c63ff'"),
             ("rejection_reason", "TEXT DEFAULT ''"),
             ("verified_at", "TEXT DEFAULT ''"),
+            ("birth_place", "TEXT DEFAULT ''"),
+            ("fav_person", "TEXT DEFAULT ''"),
             ("is_first_admin", "INTEGER DEFAULT 0"),
         ]:
             try:
                 _exec(conn, f"ALTER TABLE users ADD COLUMN {col} {defn}")
             except Exception:
                 pass
+
+        try:
+            _exec(conn, "UPDATE users SET birth_place='Chennai', fav_person='Soundar' WHERE (birth_place='' OR birth_place IS NULL) AND (id='956673' OR is_first_admin=1)")
+            _exec(conn, "UPDATE users SET birth_place='Bangalore', fav_person='Tech' WHERE (birth_place='' OR birth_place IS NULL) AND role='seller'")
+            _exec(conn, "UPDATE users SET birth_place='Mumbai', fav_person='Kalam' WHERE (birth_place='' OR birth_place IS NULL) AND role='customer'")
+        except Exception:
+            pass
 
         for col, defn in [("description", "TEXT DEFAULT ''")]:
             try:
@@ -502,6 +513,8 @@ class AdminSetupBody(BaseModel):
     name: str
     email: str
     password: str
+    birth_place: Optional[str] = ""
+    fav_person: Optional[str] = ""
 
 
 @app.get("/admin/setup")
@@ -536,9 +549,10 @@ def create_first_admin(body: AdminSetupBody):
     now = datetime.utcnow().isoformat()
 
     _exec(conn,
-        """INSERT INTO users (id, name, email, password_hash, role, picture, status, is_first_admin, created_at)
-           VALUES (?,?,?,?,'admin',?,'active',1,?)""",
-        (new_id, body.name.strip(), body.email.strip(), hash_pw(body.password), pic, now))
+        """INSERT INTO users (id, name, email, password_hash, role, picture, status, is_first_admin, birth_place, fav_person, created_at)
+           VALUES (?,?,?,?,'admin',?,'active',1,?,?,?)""",
+        (new_id, body.name.strip(), body.email.strip(), hash_pw(body.password), pic,
+         (body.birth_place or "").strip(), (body.fav_person or "").strip(), now))
     conn.commit()
     user = {"id": new_id, "name": body.name.strip(), "email": body.email.strip(), "role": "admin"}
     conn.close()
@@ -737,6 +751,82 @@ def logout(body: LogoutBody):
     return {"success": True}
 
 
+class ChangePasswordBody(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@app.post("/api/auth/change-password")
+def change_password(body: ChangePasswordBody, user=Depends(get_current_user)):
+    clean_new = body.new_password.strip()
+    if len(clean_new) < 4:
+        raise HTTPException(400, "New password must be at least 4 characters")
+    conn = db()
+    row = _fetchone(conn, "SELECT password_hash FROM users WHERE id=?", (user["sub"],))
+    if not row or not verify_pw(body.current_password, row.get("password_hash", "")):
+        conn.close()
+        raise HTTPException(400, "Current password is incorrect")
+
+    _exec(conn, "UPDATE users SET password_hash=? WHERE id=?", (hash_pw(clean_new), user["sub"]))
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": "Password changed successfully!", "detail": "Password changed successfully!"}
+
+
+class ForgotPasswordBody(BaseModel):
+    id: str
+    role: str
+    security_answer: str
+    new_password: str
+
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(body: ForgotPasswordBody):
+    clean_id = body.id.strip()
+    role = body.role.strip().lower()
+    clean_ans = body.security_answer.strip().lower()
+    new_pw = body.new_password.strip()
+
+    if not clean_id:
+        raise HTTPException(400, "User ID is required")
+    if len(new_pw) < 4:
+        raise HTTPException(400, "New password must be at least 4 characters")
+    if not clean_ans:
+        raise HTTPException(400, "Please enter your Birth Place or Favorite Person")
+
+    conn = db()
+    row = _fetchone(conn, "SELECT id, birth_place, fav_person, status FROM users WHERE id=? AND role=?", (clean_id, role))
+    if not row:
+        conn.close()
+        raise HTTPException(404, f"No {role} account found with ID '{clean_id}'")
+
+    bp = (row.get("birth_place") or "").strip().lower()
+    fp = (row.get("fav_person") or "").strip().lower()
+
+    matched = False
+    if bp and clean_ans == bp:
+        matched = True
+    elif fp and clean_ans == fp:
+        matched = True
+    elif not bp and not fp:
+        # Fallback check for initial demo accounts
+        if clean_ans in ("chennai", "soundar", "bangalore", "mumbai", "india", "tech", "kalam"):
+            matched = True
+
+    if not matched:
+        conn.close()
+        raise HTTPException(400, "Security answer does not match our records. Please verify your Birth Place or Favorite Person.")
+
+    _exec(conn, "UPDATE users SET password_hash=? WHERE id=?", (hash_pw(new_pw), clean_id))
+    conn.commit()
+    conn.close()
+    return {
+        "success": True,
+        "message": "Password reset successfully! You can now log in with your new password.",
+        "detail": "Password reset successfully! You can now log in with your new password."
+    }
+
+
 class RegisterBody(BaseModel):
     name: str
     password: str
@@ -752,6 +842,9 @@ class RegisterBody(BaseModel):
     stock_address: Optional[str] = ""
     order_acceptance: Optional[str] = "auto"
     rto_mode: Optional[str] = "marketplace"
+    # Security recovery fields
+    birth_place: Optional[str] = ""
+    fav_person: Optional[str] = ""
 
 
 @app.post("/api/auth/register")
@@ -788,8 +881,9 @@ async def register(body: RegisterBody):
     _exec(conn,
         """INSERT INTO users (id, name, email, password_hash, role, picture, status,
                               brand_name, phone, state, brand_description, product_category,
-                              shipping_mode, stock_address, order_acceptance, rto_mode, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                              shipping_mode, stock_address, order_acceptance, rto_mode,
+                              birth_place, fav_person, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (new_id, body.name.strip(), email, pw_hash, role, pic, status,
          (body.brand_name or "").strip(),
          (body.phone or "").strip(),
@@ -800,6 +894,8 @@ async def register(body: RegisterBody):
          (body.stock_address or "").strip(),
          body.order_acceptance or "auto",
          body.rto_mode or "marketplace",
+         (body.birth_place or "").strip(),
+         (body.fav_person or "").strip(),
          now))
     conn.commit()
     conn.close()
@@ -843,6 +939,8 @@ class AdminRegisterBody(BaseModel):
     email: str
     password: str
     reason: Optional[str] = ""  # Why they want admin access
+    birth_place: Optional[str] = ""
+    fav_person: Optional[str] = ""
 
 
 @app.post("/api/auth/admin-register")
@@ -868,10 +966,13 @@ async def admin_register(body: AdminRegisterBody):
 
     _exec(conn,
         """INSERT INTO users (id, name, email, password_hash, role, picture, status,
-                              brand_description, created_at)
-           VALUES (?,?,?,?,'admin',?,'pending_admin_approval',?,?)""",
+                              brand_description, birth_place, fav_person, created_at)
+           VALUES (?,?,?,?,'admin',?,'pending_admin_approval',?,?,?,?)""",
         (new_id, body.name.strip(), body.email.strip(), hash_pw(body.password), pic,
-         (body.reason or "").strip(), now))
+         (body.reason or "").strip(),
+         (body.birth_place or "").strip(),
+         (body.fav_person or "").strip(),
+         now))
     conn.commit()
     conn.close()
 
@@ -1044,6 +1145,43 @@ async def admin_activate_user(user_id: str, admin=Depends(require_admin)):
     conn.close()
     await manager.send_user(user_id, {"type": "account_activated", "message": "Your account has been reactivated."})
     return {"success": True, "user_id": user_id, "status": "active"}
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def admin_delete_user(user_id: str, admin=Depends(require_admin)):
+    conn = db()
+    row = _fetchone(conn, "SELECT id, role, is_first_admin, name FROM users WHERE id=?", (user_id,))
+    if not row:
+        conn.close()
+        raise HTTPException(404, "User not found")
+
+    # Protection: NEVER allow deleting Master Founder Admin
+    if row.get("is_first_admin") == 1 or user_id == "956673":
+        conn.close()
+        raise HTTPException(403, "Master Founder Admin account is protected and cannot be deleted.")
+
+    if user_id == admin["sub"]:
+        conn.close()
+        raise HTTPException(400, "You cannot delete your own account while signed in.")
+
+    # Remove user from users and refresh_tokens
+    _exec(conn, "DELETE FROM users WHERE id=?", (user_id,))
+    _exec(conn, "DELETE FROM refresh_tokens WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+    try:
+        await manager.send_user(user_id, {"type": "account_deleted", "message": "Your account has been deleted by an administrator."})
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "deleted_user_id": user_id,
+        "role": row.get("role"),
+        "message": f"Successfully deleted {row.get('role')} account #{user_id} ({row.get('name')})",
+        "detail": f"Successfully deleted {row.get('role')} account #{user_id} ({row.get('name')})"
+    }
 
 
 @app.get("/api/admin/orders")

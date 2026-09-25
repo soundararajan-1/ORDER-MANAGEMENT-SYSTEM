@@ -323,6 +323,222 @@ function fillAdminLogin(id, pw){
   performIdLogin(id, pw, "admin");
 }
 
+/* ================= FORGOT PASSWORD & RECOVERY ================= */
+function openForgotPasswordModal(){
+  const root = document.getElementById("modal-root");
+  const prefillId = document.getElementById("loginIdInput")?.value?.trim() || "";
+  const initialRole = state.role || window.currentRole || "customer";
+
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-7 w-full max-w-md pop-in bg-[#070b22]/98 border-cyan-500/40 relative z-50">
+        <div class="flex items-center justify-between pb-3 mb-4 border-b border-white/10">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">🔐</span>
+            <div>
+              <h3 class="text-base font-bold text-white">Reset Account Password</h3>
+              <p class="text-[11px] text-white/50">Recover your account using your security recovery answer</p>
+            </div>
+          </div>
+          <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+        </div>
+
+        <form id="forgotPasswordForm" class="space-y-3.5">
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Account Role</label>
+            <select id="forgotRole" class="w-full bg-[#0a0f2b] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400">
+              <option value="customer" ${initialRole==='customer'?'selected':''}>Customer (7-Digit ID)</option>
+              <option value="seller" ${initialRole==='seller'?'selected':''}>Seller / Merchant (7-Digit ID)</option>
+              <option value="admin" ${initialRole==='admin'?'selected':''}>Administrator (6 or 7-Digit ID)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Your User ID *</label>
+            <input id="forgotUserId" required type="text" placeholder="e.g. 7001001 or 956673" value="${prefillId}" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div class="glass p-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5">
+            <label class="block text-xs font-bold text-cyan-300 mb-1 flex items-center gap-1.5">
+              <span>🎯 Security Recovery Verification</span>
+            </label>
+            <p class="text-[11px] text-white/60 mb-2">Enter either your registered <strong class="text-white">Birth Place</strong> OR your <strong class="text-white">Favorite Person</strong>:</p>
+            <input id="forgotSecurityAnswer" required type="text" placeholder="e.g. Chennai or Soundar" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            <p class="text-[10px] text-white/40 mt-1">Default demo hints: Chennai / Soundar (Admin), Bangalore / Tech (Sellers), Mumbai / Kalam (Customers)</p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">New Password *</label>
+            <div class="relative">
+              <input id="forgotNewPassword" required type="password" minlength="4" placeholder="Enter new password" class="w-full bg-white/5 border border-white/10 rounded-xl pl-3.5 pr-11 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+              <button type="button" onclick="togglePasswordVisibility('forgotNewPassword', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-cyan-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Confirm New Password *</label>
+            <div class="relative">
+              <input id="forgotConfirmPassword" required type="password" minlength="4" placeholder="Confirm new password" class="w-full bg-white/5 border border-white/10 rounded-xl pl-3.5 pr-11 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+              <button type="button" onclick="togglePasswordVisibility('forgotConfirmPassword', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-cyan-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="pt-2 flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="btn-neon text-xs font-bold px-5 py-2.5 cursor-pointer">Reset Password & Save 🚀</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("forgotPasswordForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const id = document.getElementById("forgotUserId").value.trim();
+    const role = document.getElementById("forgotRole").value;
+    const security_answer = document.getElementById("forgotSecurityAnswer").value.trim();
+    const new_password = document.getElementById("forgotNewPassword").value;
+    const confirm_password = document.getElementById("forgotConfirmPassword").value;
+
+    if(new_password !== confirm_password){
+      toast("New passwords do not match!", "error");
+      return;
+    }
+
+    try {
+      const res = await api("/api/auth/forgot-password", {
+        method: "POST",
+        body: JSON.stringify({ id, role, security_answer, new_password })
+      });
+      closeModal();
+      toast(res.detail || "Password reset successfully! Please sign in.", "success");
+      const loginId = document.getElementById("loginIdInput");
+      const loginPw = document.getElementById("loginPwInput");
+      if(loginId) loginId.value = id;
+      if(loginPw) loginPw.value = new_password;
+      if(role === "seller") document.getElementById("roleSellerBtn")?.click();
+      else if(role === "admin") document.getElementById("roleAdminBtn")?.click();
+      else document.getElementById("roleCustomerBtn")?.click();
+    } catch(err){
+      toast(err.message, "error");
+    }
+  };
+}
+
+/* ================= CHANGE PASSWORD (LOGGED IN) ================= */
+function openChangePasswordModal(){
+  if(!state.user){
+    toast("Please sign in to change your password", "warning");
+    return;
+  }
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-7 w-full max-w-md pop-in bg-[#070b22]/98 border-amber-500/40 relative z-50">
+        <div class="flex items-center justify-between pb-3 mb-4 border-b border-white/10">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">🔑</span>
+            <div>
+              <h3 class="text-base font-bold text-white">Change Account Password</h3>
+              <p class="text-[11px] text-white/50">${state.user.name} (#${state.user.id} · ${(state.role||'user').toUpperCase()})</p>
+            </div>
+          </div>
+          <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+        </div>
+
+        <form id="changePasswordForm" class="space-y-3.5">
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Current Password *</label>
+            <div class="relative">
+              <input id="changeCurrentPassword" required type="password" placeholder="Enter current password" class="w-full bg-white/5 border border-white/10 rounded-xl pl-3.5 pr-11 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+              <button type="button" onclick="togglePasswordVisibility('changeCurrentPassword', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-amber-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">New Password (min 4 chars) *</label>
+            <div class="relative">
+              <input id="changeNewPassword" required type="password" minlength="4" placeholder="Enter new password" class="w-full bg-white/5 border border-white/10 rounded-xl pl-3.5 pr-11 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+              <button type="button" onclick="togglePasswordVisibility('changeNewPassword', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-amber-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Confirm New Password *</label>
+            <div class="relative">
+              <input id="changeConfirmPassword" required type="password" minlength="4" placeholder="Confirm new password" class="w-full bg-white/5 border border-white/10 rounded-xl pl-3.5 pr-11 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+              <button type="button" onclick="togglePasswordVisibility('changeConfirmPassword', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-amber-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="pt-2 flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="glass px-5 py-2.5 rounded-xl text-xs font-bold text-amber-300 border border-amber-400/40 hover:bg-white/10 cursor-pointer">Update Password</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("changePasswordForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const current_password = document.getElementById("changeCurrentPassword").value;
+    const new_password = document.getElementById("changeNewPassword").value;
+    const confirm_password = document.getElementById("changeConfirmPassword").value;
+
+    if(new_password !== confirm_password){
+      toast("New passwords do not match!", "error");
+      return;
+    }
+    if(current_password === new_password){
+      toast("New password cannot be identical to current password", "warning");
+      return;
+    }
+
+    try {
+      const res = await api("/api/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({ current_password, new_password })
+      });
+      closeModal();
+      toast(res.detail || "Password changed successfully!", "success");
+    } catch(err){
+      toast(err.message, "error");
+    }
+  };
+}
+
+/* ================= ADMIN REMOVE/DELETE USER ID ================= */
+async function adminDeleteUser(userId, name, role){
+  if(userId === '956673' || (state.user && state.user.id === userId)){
+    toast("The Master Founder Admin account cannot be deleted.", "warning");
+    return;
+  }
+  const roleName = role ? role.toUpperCase() : "USER";
+  if(!confirm(`⚠️ ARE YOU SURE?\n\nPermanently delete ${roleName} account #${userId} (${name})?\n\nThis will completely remove their credentials, sessions, and access immediately. This action cannot be undone.`)){
+    return;
+  }
+  try {
+    const res = await api(`/api/admin/users/${userId}`, { method: "DELETE" });
+    toast(res.detail || `User #${userId} permanently deleted`, "success");
+    if(state.adminActiveTab === "Admin Accounts"){
+      await renderAdminAccounts();
+    } else {
+      await renderAdminUsers();
+    }
+  } catch(e){
+    toast("Failed to delete user: " + e.message, "error");
+  }
+}
+
 async function api(path, opts={}){
   const headers = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
   if(state.token) headers["Authorization"] = "Bearer " + state.token;
@@ -604,7 +820,10 @@ async function renderLogin(){
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-white/70 mb-1">Password</label>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-semibold text-white/70">Password</label>
+            <button type="button" onclick="openForgotPasswordModal()" class="text-[11px] text-cyan-400 hover:text-cyan-300 hover:underline cursor-pointer">Forgot Password?</button>
+          </div>
           <div class="relative">
             <input id="loginPwInput" required type="password" placeholder="••••••••" class="w-full bg-white/5 border border-white/10 rounded-xl pl-4 pr-11 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400 placeholder-white/30" />
             <button type="button" onclick="togglePasswordVisibility('loginPwInput', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-cyan-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
@@ -851,6 +1070,17 @@ function openCustomerRegisterModal(){
             </div>
           </div>
 
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div>
+              <label class="block text-xs font-semibold text-white/70 mb-1">Birth Place (Recovery)</label>
+              <input id="regCustBirthPlace" type="text" placeholder="e.g. Mumbai" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-white/70 mb-1">Favorite Person (Recovery)</label>
+              <input id="regCustFavPerson" type="text" placeholder="e.g. APJ Abdul Kalam" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+          </div>
+
           <div class="pt-3 flex justify-end gap-2">
             <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
             <button type="submit" class="btn-neon text-xs font-bold px-5 py-2.5 cursor-pointer">Generate 7-Digit ID & Join</button>
@@ -864,11 +1094,13 @@ function openCustomerRegisterModal(){
     const name = document.getElementById("regCustName").value;
     const email = document.getElementById("regCustEmail").value;
     const password = document.getElementById("regCustPassword").value;
+    const birth_place = document.getElementById("regCustBirthPlace")?.value?.trim() || "";
+    const fav_person = document.getElementById("regCustFavPerson")?.value?.trim() || "";
 
     try{
       const data = await api("/api/auth/register", {
         method: "POST",
-        body: JSON.stringify({ name, email, password, role: "customer" })
+        body: JSON.stringify({ name, email, password, role: "customer", birth_place, fav_person })
       });
       closeModal();
       alert(`🎉 Registration Successful!\n\nYour 7-Digit Customer ID is: ${data.generated_id}\n\nPlease save this ID to log in anytime!`);
@@ -1059,6 +1291,17 @@ function openSellerKycModal(){
               </div>
             </div>
 
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label class="block text-xs font-semibold text-white/80 mb-1">Birth Place (Recovery)</label>
+                <input id="kycBirthPlace" type="text" placeholder="e.g. Bangalore" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-white/80 mb-1">Favorite Person (Recovery)</label>
+                <input id="kycFavPerson" type="text" placeholder="e.g. Tech Leader / Mentor" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+              </div>
+            </div>
+
             <!-- KYC Verification Notice -->
             <div class="glass p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs">
               <div class="flex items-start gap-2.5">
@@ -1142,6 +1385,8 @@ function openSellerKycModal(){
     const rto_mode = document.querySelector('input[name="rtoMode"]:checked')?.value || "seller_return";
     const email = document.getElementById("kycEmail").value.trim();
     const password = document.getElementById("kycPassword").value;
+    const birth_place = document.getElementById("kycBirthPlace")?.value?.trim() || "";
+    const fav_person = document.getElementById("kycFavPerson")?.value?.trim() || "";
 
     try{
       const data = await api("/api/auth/register", {
@@ -1151,7 +1396,8 @@ function openSellerKycModal(){
           brand_name, phone, state: stateVal,
           brand_description, product_category,
           shipping_mode, stock_address,
-          order_acceptance, rto_mode
+          order_acceptance, rto_mode,
+          birth_place, fav_person
         })
       });
       closeModal();
@@ -1299,6 +1545,16 @@ function openAdminApplyModal(){
             </div>
           </div>
 
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Birth Place (Recovery)</label>
+              <input id="adminApplyBirthPlace" type="text" placeholder="e.g. Chennai" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Favorite Person (Recovery)</label>
+              <input id="adminApplyFavPerson" type="text" placeholder="e.g. Soundar" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+          </div>
 
           <div>
             <label class="block text-xs font-semibold text-white/80 mb-1">Reason for Admin Privileges</label>
@@ -1319,11 +1575,13 @@ function openAdminApplyModal(){
     const email = document.getElementById("adminApplyEmail").value.trim();
     const password = document.getElementById("adminApplyPassword").value;
     const reason = document.getElementById("adminApplyReason").value.trim();
+    const birth_place = document.getElementById("adminApplyBirthPlace")?.value?.trim() || "";
+    const fav_person = document.getElementById("adminApplyFavPerson")?.value?.trim() || "";
 
     try{
       const data = await api("/api/auth/admin-register", {
         method: "POST",
-        body: JSON.stringify({ name, email, password, reason })
+        body: JSON.stringify({ name, email, password, reason, birth_place, fav_person })
       });
       closeModal();
       alert(`🎉 Application Submitted!\n\nYour 7-Digit Admin ID is: ${data.generated_id}\n\nPlease have an active platform administrator approve your ID before signing in.`);
@@ -1380,6 +1638,9 @@ function navBar(tabs, activeTab, onSwitch){
             <span class="text-[10px] text-white/50">↗</span>
           </button>
         `}
+        <button onclick="openChangePasswordModal()" class="text-xs px-2.5 py-1.5 rounded-xl border border-white/10 hover:border-amber-400/40 bg-white/5 text-amber-300 transition-all cursor-pointer flex items-center gap-1" title="Change your account password">
+          <span>🔑 Password</span>
+        </button>
         <img src="${state.user.picture||'https://api.dicebear.com/7.x/identicon/svg?seed='+state.user.name}" class="w-8 h-8 rounded-full border border-white/20 object-cover" />
         <button id="logoutBtn" class="text-xs text-white/40 hover:text-white/80 cursor-pointer">Sign out</button>
       </div>
@@ -4260,17 +4521,22 @@ async function renderAdminUsers(){
                   <td class="py-3 px-3 text-right">
                     ${isFounder ? `
                       <span class="text-[10px] text-amber-400 font-bold px-2 py-1 bg-amber-500/10 rounded-lg border border-amber-500/20">👑 Founder Admin</span>
-                    ` : (
-                      u.status === 'active' ? `
-                        <button onclick="adminToggleUserStatus('${u.id}', 'suspended')" class="px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 text-[10px] font-bold cursor-pointer">
-                          Suspend
+                    ` : `
+                      <div class="inline-flex items-center gap-1.5 justify-end">
+                        ${u.status === 'active' ? `
+                          <button onclick="adminToggleUserStatus('${u.id}', 'suspended')" class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold cursor-pointer" title="Suspend account">
+                            Suspend
+                          </button>
+                        ` : `
+                          <button onclick="adminToggleUserStatus('${u.id}', 'active')" class="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold cursor-pointer" title="Reactivate account">
+                            Reactivate
+                          </button>
+                        `}
+                        <button onclick="adminDeleteUser('${u.id}', '${(u.brand_name || u.name || '').replace(/'/g, "\\'")}', '${u.role}')" class="px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/40 text-red-300 border border-red-500/40 text-[10px] font-bold cursor-pointer flex items-center gap-1" title="Permanently delete user ID">
+                          <span>🗑️ Delete</span>
                         </button>
-                      ` : `
-                        <button onclick="adminToggleUserStatus('${u.id}', 'active')" class="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold cursor-pointer">
-                          Reactivate
-                        </button>
-                      `
-                    )}
+                      </div>
+                    `}
                   </td>
                 </tr>`;
             }).join('') || '<tr><td colspan="6" class="text-center py-6 text-white/40">No users match filters.</td></tr>'}
@@ -4676,6 +4942,9 @@ async function renderAdminAccounts(){
                     <span class="text-[10px] font-bold text-amber-300 px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/30">👑 Founder (Supreme Authority)</span>
                   ` : `
                     <span class="text-[10px] font-semibold text-emerald-300 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">Verified Admin</span>
+                    <button onclick="adminDeleteUser('${a.id}', '${(a.name||'Admin').replace(/'/g, "\\'")}', 'admin')" class="px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/40 text-red-300 border border-red-500/40 text-[10px] font-bold cursor-pointer flex items-center gap-1" title="Revoke and permanently delete this admin ID">
+                      <span>🗑️ Delete Admin</span>
+                    </button>
                   `}
                 </div>
               </div>`;
