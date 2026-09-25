@@ -4,6 +4,16 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OrderFlow AI — Multi-Seller Real-Time Operations</title>
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#050816" />
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23050816'/><path d='M50 15 L25 55 L48 55 L42 85 L75 45 L52 45 Z' fill='%2300E5FF'/></svg>">
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -18,8 +28,35 @@
   body{
     margin:0; background:var(--navy); color:#e8ecff;
     font-family:'Inter',sans-serif; overflow-x:hidden; min-height:100vh;
+    transition: background 0.3s ease, color 0.3s ease;
   }
   h1,h2,h3,h4,.display{font-family:'Space Grotesk',sans-serif;}
+
+  /* ---------- light mode theme ---------- */
+  body.light-theme{
+    --navy:#f1f5f9; background:#f1f5f9; color:#0f172a;
+  }
+  body.light-theme .aurora-wrap{ background:#f8fafc; }
+  body.light-theme .blob{ opacity:0.18; mix-blend-mode:multiply; }
+  body.light-theme .glass{
+    background:rgba(255,255,255,0.88);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border:1px solid rgba(15,23,42,0.1);
+    box-shadow:0 10px 30px -10px rgba(0,0,0,0.07);
+    color:#0f172a;
+  }
+  body.light-theme .glass:hover{
+    box-shadow:0 12px 35px -8px rgba(0,229,255,0.25), 0 8px 30px -10px rgba(124,58,237,0.2);
+  }
+  body.light-theme .text-white{ color:#0f172a !important; }
+  body.light-theme .text-white\/90, body.light-theme .text-white\/80, body.light-theme .text-white\/70,
+  body.light-theme .text-white\/60, body.light-theme .text-white\/50, body.light-theme .text-white\/40,
+  body.light-theme .text-white\/30, body.light-theme .text-white\/20{ color:#475569 !important; }
+  body.light-theme input, body.light-theme select, body.light-theme textarea{
+    background:#ffffff !important; color:#0f172a !important; border-color:#cbd5e1 !important;
+  }
+  body.light-theme .modal-backdrop{ background:rgba(15,23,42,0.65); }
 
   /* ---------- aurora background ---------- */
   .aurora-wrap{position:fixed; inset:0; z-index:0; overflow:hidden; background:var(--navy);}
@@ -144,6 +181,8 @@
 <div id="toast-root" class="fixed top-6 right-6 z-50 flex flex-col gap-2"></div>
 <div id="modal-root"></div>
 <div id="chatDrawer" data-open="false" class="fixed top-0 right-0 h-full w-full sm:w-[460px] translate-x-full transition-transform duration-300 z-50 p-4"></div>
+<div id="supportDrawer" data-open="false" class="fixed top-0 right-0 h-full w-full sm:w-[480px] translate-x-full transition-transform duration-300 z-50 p-4"></div>
+<div id="supportFabContainer" class="fixed bottom-6 right-6 z-40"></div>
 
 <div id="app" class="relative z-10 min-h-screen"></div>
 
@@ -180,7 +219,39 @@ const state = {
   selectedPaymentMethod: "UPI",
   deliveryAddress: "Flat 402, Skyline Towers, Indiranagar, Bangalore - 560038",
   deliveryPhone: "+91 98765 43210",
+  // Admin module:
+  adminActiveTab: "Overview",
+  adminStats: null,
+  pendingSellers: [],
+  pendingAdmins: [],
+  adminUsers: [],
+  adminOrders: [],
+  adminTickets: [],
+  activeTicketId: null,
+  activeTicketMessages: [],
+  // Smart Support Drawer:
+  supportDrawerOpen: false,
+  userTickets: [],
+  activeUserTicketId: null,
+  userTicketMessages: [],
+  currentTheme: localStorage.getItem('orderflow_theme') || 'dark',
 };
+
+// Initialize Theme
+if (state.currentTheme === 'light') {
+  document.body.classList.add('light-theme');
+}
+
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light-theme');
+  state.currentTheme = isLight ? 'light' : 'dark';
+  localStorage.setItem('orderflow_theme', state.currentTheme);
+  const themeBtns = document.querySelectorAll('.theme-toggle-btn');
+  themeBtns.forEach(btn => {
+    btn.innerHTML = isLight ? '☀️ Light' : '🌙 Dark';
+  });
+  toast(`Switched to ${isLight ? 'Light' : 'Dark'} mode`, 'info');
+}
 
 /* ================= AUDIO CHIME ================= */
 function playOrderChime() {
@@ -392,6 +463,68 @@ function connectWebSocket(){
         toast(`💬 [Order #${msg.message.order_id}] ${msg.message.sender_name}: "${msg.message.message}"`, "info");
       }
     }
+
+    // 8. Admin: New Seller Pending Verification
+    if(msg.type === "new_seller_verification"){
+      playOrderChime();
+      if(state.role === "admin"){
+        toast(`🛡️ New Seller Application: ${msg.seller_name} (${msg.brand_name || 'Store'})`, "warning");
+        if(state.adminActiveTab === "Seller Verification" || state.adminActiveTab === "Overview"){
+          renderAdmin(state.adminActiveTab);
+        }
+      }
+    }
+
+    // 9. Admin: New Admin Request Pending Approval
+    if(msg.type === "new_admin_request"){
+      playOrderChime();
+      if(state.role === "admin"){
+        toast(`🔑 New Admin Access Request: ${msg.name} (${msg.email})`, "warning");
+        if(state.adminActiveTab === "Admin Accounts" || state.adminActiveTab === "Overview"){
+          renderAdmin(state.adminActiveTab);
+        }
+      }
+    }
+
+    // 10. Admin: New Support Ticket
+    if(msg.type === "new_support_ticket"){
+      playOrderChime();
+      if(state.role === "admin"){
+        toast(`💬 Support Ticket #${msg.ticket_id} from ${msg.user_name} (${msg.category})`, "info");
+        if(state.adminActiveTab === "Support Desk" || state.adminActiveTab === "Overview"){
+          renderAdmin(state.adminActiveTab);
+        }
+      }
+    }
+
+    // 11. Support Live Chat Message (Customer/Seller <-> Admin)
+    if(msg.type === "support_message"){
+      playOrderChime();
+      if(state.role === "admin" && state.activeTicketId === msg.message.ticket_id){
+        state.activeTicketMessages.push(msg.message);
+        renderAdminTicketMessages();
+      } else if(state.activeUserTicketId === msg.message.ticket_id){
+        state.userTicketMessages.push(msg.message);
+        renderSupportChatMessages();
+      } else {
+        toast(`💬 [Support #${msg.message.ticket_id}] ${msg.message.sender_name}: "${msg.message.message}"`, "info");
+      }
+    }
+
+    // 12. Support Ticket Reply
+    if(msg.type === "support_reply"){
+      playOrderChime();
+      toast(`💬 Support Reply: "${msg.reply}" (${msg.status})`, "success");
+      if(state.activeUserTicketId === msg.ticket_id){
+        loadSupportTicketMessages(msg.ticket_id);
+      }
+    }
+
+    // 13. Seller Account Approved
+    if(msg.type === "account_approved"){
+      confettiBurst();
+      toast(`🎉 ${msg.message}`, "success");
+    }
   };
   state.ws = ws;
 }
@@ -405,7 +538,8 @@ function refreshActiveSellerTab(){
 async function renderLogin(){
   const app = document.getElementById("app");
   const urlParams = new URLSearchParams(window.location.search);
-  let currentRole = urlParams.get("role") === "seller" ? "seller" : "customer";
+  const paramRole = urlParams.get("role");
+  let currentRole = (paramRole === "seller" || paramRole === "admin") ? paramRole : "customer";
 
   // Pre-load default profiles
   let profiles = {sellers: [], customers: []};
@@ -416,28 +550,37 @@ async function renderLogin(){
   app.innerHTML = `
   <div class="min-h-screen flex items-center justify-center px-4 py-8">
     <div class="glass glow-border p-8 sm:p-10 w-full max-w-lg fade-up relative z-20">
-      <div class="text-center mb-6">
-        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-3 shadow-lg shadow-cyan-500/20" style="background:linear-gradient(135deg,rgba(0,229,255,.2),rgba(124,58,237,.3)); border:1px solid rgba(0,229,255,0.4);">
+      
+      <div class="flex justify-between items-center mb-6">
+        <div class="w-12"></div>
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg shadow-cyan-500/20" style="background:linear-gradient(135deg,rgba(0,229,255,.2),rgba(124,58,237,.3)); border:1px solid rgba(0,229,255,0.4);">
           <span class="text-3xl">⚡</span>
         </div>
-        <h1 class="text-3xl font-bold mb-1 bg-clip-text text-transparent" style="background-image:linear-gradient(120deg,var(--cyan),var(--purple));-webkit-background-clip:text;">OrderFlow AI</h1>
-        <p class="text-xs text-white/60">Multi-Seller Marketplace & Order Management</p>
+        <button onclick="toggleTheme()" class="theme-toggle-btn text-xs px-2.5 py-1.5 rounded-xl border border-white/10 hover:border-cyan-400/40 bg-white/5 text-white/70 transition-all cursor-pointer flex items-center gap-1">
+          <span>${state.currentTheme === 'light' ? '☀️ Light' : '🌙 Dark'}</span>
+        </button>
       </div>
 
-      <!-- Role Switcher -->
-      <div class="flex justify-center gap-3 mb-6 p-1.5 rounded-full bg-white/5 border border-white/10">
+      <div class="text-center mb-6">
+        <h1 class="text-3xl font-bold mb-1 bg-clip-text text-transparent" style="background-image:linear-gradient(120deg,var(--cyan),var(--purple));-webkit-background-clip:text;">OrderFlow AI</h1>
+        <p class="text-xs text-white/60">Multi-Seller Marketplace, Operations & Admin Hub</p>
+      </div>
+
+      <!-- 3-Role Switcher -->
+      <div class="flex justify-center gap-2 mb-6 p-1.5 rounded-full bg-white/5 border border-white/10">
         <button id="roleCustomerBtn" class="tab flex-1 ${currentRole==='customer'?'active':''}">🛒 Customer</button>
         <button id="roleSellerBtn" class="tab flex-1 ${currentRole==='seller'?'active':''}">🏪 Seller Hub</button>
+        <button id="roleAdminBtn" class="tab flex-1 ${currentRole==='admin'?'active':''}">🔐 Admin</button>
       </div>
 
       <!-- 7-Digit ID Login Form -->
-      <form id="idLoginForm" class="space-y-4 mb-6">
+      <form id="idLoginForm" class="space-y-4 mb-5">
         <div>
           <label class="block text-xs font-semibold text-white/70 mb-1 flex justify-between">
-            <span id="idInputLabel">${currentRole==='seller' ? '7-Digit Seller ID' : '7-Digit Customer ID'}</span>
+            <span id="idInputLabel">${currentRole==='seller' ? '7-Digit Seller ID' : (currentRole==='admin' ? '7-Digit Admin ID' : '7-Digit Customer ID')}</span>
             <span class="text-[10px] text-cyan-300 font-mono">Exactly 7 digits</span>
           </label>
-          <input id="loginIdInput" required type="text" maxlength="7" pattern="[0-9]{7}" placeholder="${currentRole==='seller' ? '1001001' : '7001001'}" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono text-white focus:outline-none focus:border-cyan-400 placeholder-white/30 tracking-wider text-base" />
+          <input id="loginIdInput" required type="text" maxlength="7" pattern="[0-9]{7}" placeholder="${currentRole==='seller' ? '1001001' : (currentRole==='admin' ? '9000001' : '7001001')}" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono text-white focus:outline-none focus:border-cyan-400 placeholder-white/30 tracking-wider text-base" />
         </div>
 
         <div>
@@ -450,8 +593,25 @@ async function renderLogin(){
         </button>
       </form>
 
-      <!-- Quick 1-Click Demo Profiles -->
-      <div class="pt-4 border-t border-white/10 mb-4">
+      <!-- Admin Provisioning Section (Shown for Admin Role) -->
+      <div id="adminActionSection" class="pt-4 border-t border-white/10 mb-4 ${currentRole==='admin'?'':'hidden'}">
+        <p class="text-[11px] uppercase tracking-wider text-white/50 font-bold mb-2.5 flex items-center justify-between">
+          <span>🔑 Admin Provisioning & Approvals:</span>
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button type="button" id="btnAdminSetup" class="glass px-3 py-2.5 rounded-xl text-left border border-cyan-500/30 hover:border-cyan-400 text-xs cursor-pointer flex flex-col justify-center">
+            <span class="font-bold text-cyan-300">⚡ First-Time Admin Setup</span>
+            <span class="text-[10px] text-white/50">One-time initial founder setup</span>
+          </button>
+          <button type="button" id="btnAdminApply" class="glass px-3 py-2.5 rounded-xl text-left border border-purple-500/30 hover:border-purple-400 text-xs cursor-pointer flex flex-col justify-center">
+            <span class="font-bold text-purple-300">📝 Apply for Admin ID</span>
+            <span class="text-[10px] text-white/50">Requires active admin approval</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick 1-Click Demo Profiles (Shown for Customer & Seller) -->
+      <div id="quickProfilesSection" class="pt-4 border-t border-white/10 mb-4 ${currentRole==='admin'?'hidden':''}">
         <p class="text-[11px] uppercase tracking-wider text-white/50 font-bold mb-2.5 flex items-center justify-between">
           <span>⚡ Instant 1-Click Profile Test:</span>
           <span class="text-cyan-300 font-mono text-[10px]">Pre-filled credentials</span>
@@ -459,11 +619,13 @@ async function renderLogin(){
         <div id="quickProfilesContainer" class="flex flex-col gap-2"></div>
       </div>
 
-      <!-- Register New Account Link -->
+      <!-- Register / Onboarding Link -->
       <div class="text-center pt-3 border-t border-white/5">
-        <p class="text-xs text-white/50">
-          Don't have a 7-digit ID?
-          <button id="openRegisterModalBtn" class="text-cyan-300 font-semibold hover:underline cursor-pointer ml-1">Register New Account</button>
+        <p class="text-xs text-white/50" id="regPromptContainer">
+          <span id="regPromptText">Don't have a 7-digit ID?</span>
+          <button id="openRegisterModalBtn" class="text-cyan-300 font-semibold hover:underline cursor-pointer ml-1">
+            ${currentRole==='seller' ? 'Register Seller Store (KYC)' : (currentRole==='admin' ? 'Apply for Admin Access' : 'Register Customer Account')}
+          </button>
         </p>
       </div>
     </div>
@@ -473,55 +635,88 @@ async function renderLogin(){
     const label = document.getElementById("idInputLabel");
     const input = document.getElementById("loginIdInput");
     const pw = document.getElementById("loginPwInput");
+    const adminSec = document.getElementById("adminActionSection");
+    const quickSec = document.getElementById("quickProfilesSection");
+    const regBtn = document.getElementById("openRegisterModalBtn");
+
     if(currentRole === "seller"){
       label.textContent = "7-Digit Seller ID";
       input.placeholder = "1001001";
       pw.value = "seller123";
+      adminSec.classList.add("hidden");
+      quickSec.classList.remove("hidden");
+      regBtn.textContent = "Register Seller Store (KYC)";
+    } else if(currentRole === "admin"){
+      label.textContent = "7-Digit Admin ID";
+      input.placeholder = "9000001";
+      pw.value = "";
+      adminSec.classList.remove("hidden");
+      quickSec.classList.add("hidden");
+      regBtn.textContent = "Apply for Admin Access";
     } else {
       label.textContent = "7-Digit Customer ID";
       input.placeholder = "7001001";
       pw.value = "customer123";
+      adminSec.classList.add("hidden");
+      quickSec.classList.remove("hidden");
+      regBtn.textContent = "Register Customer Account";
     }
 
     // Render quick profile chips
     const qRoot = document.getElementById("quickProfilesContainer");
-    const list = currentRole === "seller" ? profiles.sellers : profiles.customers;
-    const defaultPw = currentRole === "seller" ? "seller123" : "customer123";
+    if(qRoot && currentRole !== "admin"){
+      const list = currentRole === "seller" ? profiles.sellers : profiles.customers;
+      const defaultPw = currentRole === "seller" ? "seller123" : "customer123";
 
-    qRoot.innerHTML = list.map(u=>`
-      <button type="button" class="quick-chip glass px-3.5 py-2.5 rounded-xl text-left flex items-center justify-between hover:border-cyan-400/50 transition-all cursor-pointer text-xs" data-id="${u.id}" data-pw="${defaultPw}">
-        <div class="flex items-center gap-2.5">
-          <span class="text-lg">${currentRole==='seller'?'🏪':'👤'}</span>
-          <div>
-            <p class="font-bold text-white">${u.name}</p>
-            <p class="text-[10px] text-white/40 font-mono">ID: #${u.id}</p>
+      qRoot.innerHTML = list.map(u=>`
+        <button type="button" class="quick-chip glass px-3.5 py-2.5 rounded-xl text-left flex items-center justify-between hover:border-cyan-400/50 transition-all cursor-pointer text-xs" data-id="${u.id}" data-pw="${defaultPw}">
+          <div class="flex items-center gap-2.5">
+            <span class="text-lg">${currentRole==='seller'?'🏪':'👤'}</span>
+            <div>
+              <p class="font-bold text-white">${u.name}</p>
+              <p class="text-[10px] text-white/40 font-mono">ID: #${u.id}</p>
+            </div>
           </div>
-        </div>
-        <span class="text-[10px] px-2 py-1 rounded bg-cyan-500/20 text-cyan-300 font-medium">Click to Login</span>
-      </button>
-    `).join("") || '<p class="text-xs text-white/40">Loading profiles...</p>';
+          <span class="text-[10px] px-2 py-1 rounded bg-cyan-500/20 text-cyan-300 font-medium">Click to Login</span>
+        </button>
+      `).join("") || '<p class="text-xs text-white/40">Loading profiles...</p>';
 
-    qRoot.querySelectorAll(".quick-chip").forEach(chip=>{
-      chip.onclick = ()=>{
-        document.getElementById("loginIdInput").value = chip.dataset.id;
-        document.getElementById("loginPwInput").value = chip.dataset.pw;
-        performIdLogin(chip.dataset.id, chip.dataset.pw, currentRole);
-      };
-    });
+      qRoot.querySelectorAll(".quick-chip").forEach(chip=>{
+        chip.onclick = ()=>{
+          document.getElementById("loginIdInput").value = chip.dataset.id;
+          document.getElementById("loginPwInput").value = chip.dataset.pw;
+          performIdLogin(chip.dataset.id, chip.dataset.pw, currentRole);
+        };
+      });
+    }
   }
 
   document.getElementById("roleCustomerBtn").onclick = ()=>{
     currentRole="customer";
     document.getElementById("roleCustomerBtn").classList.add("active");
     document.getElementById("roleSellerBtn").classList.remove("active");
+    document.getElementById("roleAdminBtn").classList.remove("active");
     updateLoginUi();
   };
   document.getElementById("roleSellerBtn").onclick = ()=>{
     currentRole="seller";
     document.getElementById("roleSellerBtn").classList.add("active");
     document.getElementById("roleCustomerBtn").classList.remove("active");
+    document.getElementById("roleAdminBtn").classList.remove("active");
     updateLoginUi();
   };
+  document.getElementById("roleAdminBtn").onclick = ()=>{
+    currentRole="admin";
+    document.getElementById("roleAdminBtn").classList.add("active");
+    document.getElementById("roleCustomerBtn").classList.remove("active");
+    document.getElementById("roleSellerBtn").classList.remove("active");
+    updateLoginUi();
+  };
+
+  const btnSetup = document.getElementById("btnAdminSetup");
+  if(btnSetup) btnSetup.onclick = ()=> openAdminSetupModal();
+  const btnApply = document.getElementById("btnAdminApply");
+  if(btnApply) btnApply.onclick = ()=> openAdminApplyModal();
 
   document.getElementById("idLoginForm").onsubmit = (e)=>{
     e.preventDefault();
@@ -530,12 +725,16 @@ async function renderLogin(){
     performIdLogin(id, pw, currentRole);
   };
 
-  document.getElementById("openRegisterModalBtn").onclick = ()=> openRegisterModal(currentRole);
+  document.getElementById("openRegisterModalBtn").onclick = ()=>{
+    if(currentRole === "seller") openSellerKycModal();
+    else if(currentRole === "admin") openAdminApplyModal();
+    else openCustomerRegisterModal();
+  };
 
   updateLoginUi();
 
   // If URL specifies role and auto, automatically sign in as first default
-  if(urlParams.get("auto") === "true"){
+  if(urlParams.get("auto") === "true" && currentRole !== "admin"){
     const defaultId = currentRole === "seller" ? "1001001" : "7001001";
     const defaultPw = currentRole === "seller" ? "seller123" : "customer123";
     performIdLogin(defaultId, defaultPw, currentRole);
@@ -553,40 +752,43 @@ async function performIdLogin(id, password, role){
     state.role = role;
     toast(`Welcome, ${data.user.name} (#${data.user.id})!`, "success");
     connectWebSocket();
-    if(role === "customer") await enterCustomer(); else await enterSeller();
+    renderSupportFab();
+    if(role === "customer") await enterCustomer();
+    else if(role === "seller") await enterSeller();
+    else if(role === "admin") await enterAdmin();
   } catch(e) {
     toast(e.message, "error");
   }
 }
 
-/* ================= REGISTRATION MODAL ================= */
-function openRegisterModal(role){
+/* ================= CUSTOMER REGISTRATION ================= */
+function openCustomerRegisterModal(){
   const root = document.getElementById("modal-root");
   root.innerHTML = `
     <div class="modal-backdrop flex items-center justify-center p-4">
       <div class="glass glow-border p-6 sm:p-8 w-full max-w-md pop-in bg-[#070b22]/95 relative z-50">
         <div class="flex justify-between items-center mb-5">
           <div>
-            <h3 class="text-xl font-bold text-white">Create New ${role==='seller'?'Seller Store':'Customer Account'}</h3>
+            <h3 class="text-xl font-bold text-white">Create Customer Account</h3>
             <p class="text-xs text-white/50">Your 7-digit ID will be generated automatically</p>
           </div>
           <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
         </div>
 
-        <form id="registerForm" class="space-y-4">
+        <form id="customerRegForm" class="space-y-4">
           <div>
-            <label class="block text-xs font-semibold text-white/70 mb-1">${role==='seller'?'Store / Business Name':'Your Full Name'}</label>
-            <input id="regName" required type="text" placeholder="${role==='seller'?'e.g. Apex Tech Store':'e.g. John Doe'}" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+            <label class="block text-xs font-semibold text-white/70 mb-1">Your Full Name</label>
+            <input id="regCustName" required type="text" placeholder="e.g. Rahul Sharma" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
           </div>
 
           <div>
             <label class="block text-xs font-semibold text-white/70 mb-1">Email (Optional)</label>
-            <input id="regEmail" type="email" placeholder="email@example.com" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+            <input id="regCustEmail" type="email" placeholder="rahul@example.com" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
           </div>
 
           <div>
             <label class="block text-xs font-semibold text-white/70 mb-1">Set Password</label>
-            <input id="regPassword" required type="password" minlength="4" placeholder="At least 4 characters" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+            <input id="regCustPassword" required type="password" minlength="4" placeholder="At least 4 characters" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
           </div>
 
           <div class="pt-3 flex justify-end gap-2">
@@ -597,25 +799,459 @@ function openRegisterModal(role){
       </div>
     </div>`;
 
-  document.getElementById("registerForm").onsubmit = async (e)=>{
+  document.getElementById("customerRegForm").onsubmit = async (e)=>{
     e.preventDefault();
-    const name = document.getElementById("regName").value;
-    const email = document.getElementById("regEmail").value;
-    const password = document.getElementById("regPassword").value;
+    const name = document.getElementById("regCustName").value;
+    const email = document.getElementById("regCustEmail").value;
+    const password = document.getElementById("regCustPassword").value;
 
     try{
       const data = await api("/api/auth/register", {
         method: "POST",
-        body: JSON.stringify({ name, email, password, role })
+        body: JSON.stringify({ name, email, password, role: "customer" })
       });
       closeModal();
-      alert(`🎉 Registration Successful!\n\nYour 7-Digit ${role.toUpperCase()} ID is: ${data.generated_id}\n\nPlease note this ID to log in anytime!`);
+      alert(`🎉 Registration Successful!\n\nYour 7-Digit Customer ID is: ${data.generated_id}\n\nPlease save this ID to log in anytime!`);
       state.token = data.access_token;
       state.user = data.user;
-      state.role = role;
+      state.role = "customer";
       toast(`Signed in as ${data.user.name} (#${data.user.id})`, "success");
       connectWebSocket();
-      if(role === "customer") await enterCustomer(); else await enterSeller(true); // pass true for new store onboarding
+      renderSupportFab();
+      await enterCustomer();
+    }catch(err){ toast(err.message, "error"); }
+  };
+}
+
+/* ================= SELLER KYC REGISTRATION (MULTI-STEP) ================= */
+function openSellerKycModal(){
+  const indianStates = [
+    "Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa",
+    "Gujarat", "Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala",
+    "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland",
+    "Odisha", "Punjab", "Rajasthan", "Sikkim", "Tamil Nadu", "Telangana", "Tripura",
+    "Uttar Pradesh", "Uttarakhand", "West Bengal", "Delhi (NCT)", "Jammu and Kashmir",
+    "Ladakh", "Puducherry", "Chandigarh"
+  ];
+
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-8 w-full max-w-2xl pop-in bg-[#070b22]/98 relative z-50 max-h-[92vh] overflow-y-auto scrollbar-thin">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <span class="text-[10px] uppercase font-bold tracking-wider text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">Seller Verification Protocol</span>
+            <h3 class="text-xl font-bold text-white mt-1">Register Store & Seller KYC</h3>
+            <p class="text-xs text-white/50">Admin approval is required before listing products on OrderFlow</p>
+          </div>
+          <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1 text-lg">✕</button>
+        </div>
+
+        <!-- Step Indicators -->
+        <div class="flex items-center gap-2 mb-6 text-xs">
+          <div id="kycStep1Pill" class="flex-1 py-1.5 px-3 rounded-lg bg-cyan-500/20 border border-cyan-400 text-cyan-300 font-bold text-center">1. Brand & Contact</div>
+          <div id="kycStep2Pill" class="flex-1 py-1.5 px-3 rounded-lg bg-white/5 border border-white/10 text-white/40 font-medium text-center">2. Logistics & Warehouse</div>
+          <div id="kycStep3Pill" class="flex-1 py-1.5 px-3 rounded-lg bg-white/5 border border-white/10 text-white/40 font-medium text-center">3. Account & Security</div>
+        </div>
+
+        <form id="sellerKycForm">
+          <!-- STEP 1: Brand & Contact -->
+          <div id="kycStep1" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-white/80 mb-1">Brand / Store Name *</label>
+                <input id="kycBrandName" required type="text" placeholder="e.g. Apex Tech Essentials" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-white/80 mb-1">Seller / Contact Person Name *</label>
+                <input id="kycSellerName" required type="text" placeholder="e.g. Soundararajan K" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-white/80 mb-1">Registered State *</label>
+                <select id="kycState" required class="w-full bg-[#0a0f2b] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400">
+                  <option value="">Select Indian State / UT</option>
+                  ${indianStates.map(s => `<option value="${s}">${s}</option>`).join("")}
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-white/80 mb-1">Contact Phone Number (+91) *</label>
+                <input id="kycPhone" required type="tel" pattern="[0-9]{10}" placeholder="9876543210 (10 digits)" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400 font-mono" />
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Primary Product Category *</label>
+              <select id="kycCategory" class="w-full bg-[#0a0f2b] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400">
+                <option value="Electronics">🎧 Electronics & Gadgets</option>
+                <option value="Home & Living">💡 Home & Living</option>
+                <option value="Fashion & Apparel">👕 Fashion & Apparel</option>
+                <option value="Fitness & Sports">🧘 Fitness & Sports</option>
+                <option value="Beauty & Personal Care">✨ Beauty & Personal Care</option>
+                <option value="Grocery & Gourmet">🍎 Grocery & Essentials</option>
+                <option value="Books & Stationery">📚 Books & Stationery</option>
+                <option value="Other">📦 Other Products</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Brand & Products Description</label>
+              <textarea id="kycBrandDesc" rows="2" placeholder="Briefly describe what your brand crafts, manufactures or sells..." class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"></textarea>
+            </div>
+
+            <div class="pt-3 flex justify-end">
+              <button type="button" id="btnToStep2" class="btn-neon text-xs font-bold px-5 py-2.5 cursor-pointer">Next: Logistics Details →</button>
+            </div>
+          </div>
+
+          <!-- STEP 2: Logistics & Operations -->
+          <div id="kycStep2" class="space-y-4 hidden">
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Stock / Warehouse Pickup Address *</label>
+              <textarea id="kycAddress" required rows="2" placeholder="Complete address with PIN code where courier can collect packages..." class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"></textarea>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-white/80 mb-2">Shipping Mode *</label>
+                <div class="space-y-2">
+                  <label class="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:border-cyan-400/40">
+                    <input type="radio" name="shippingMode" value="self_ship" class="accent-cyan-400" />
+                    <div>
+                      <p class="text-xs font-bold text-white">Self Ship</p>
+                      <p class="text-[10px] text-white/50">You pack and ship via your own courier</p>
+                    </div>
+                  </label>
+                  <label class="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:border-cyan-400/40">
+                    <input type="radio" name="shippingMode" value="marketplace" checked class="accent-cyan-400" />
+                    <div>
+                      <p class="text-xs font-bold text-white">Marketplace Fulfillment</p>
+                      <p class="text-[10px] text-white/50">OrderFlow courier picks up from warehouse</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-white/80 mb-2">New Order Acceptance *</label>
+                <div class="space-y-2">
+                  <label class="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:border-cyan-400/40">
+                    <input type="radio" name="orderAccept" value="auto" checked class="accent-cyan-400" />
+                    <div>
+                      <p class="text-xs font-bold text-white">Auto-Accept Orders</p>
+                      <p class="text-[10px] text-white/50">Orders automatically move to processing</p>
+                    </div>
+                  </label>
+                  <label class="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:border-cyan-400/40">
+                    <input type="radio" name="orderAccept" value="manual" class="accent-cyan-400" />
+                    <div>
+                      <p class="text-xs font-bold text-white">Manual Approval</p>
+                      <p class="text-[10px] text-white/50">You review each order before confirming</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-2">RTO (Return-to-Origin) Handling Mode *</label>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label class="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:border-cyan-400/40">
+                  <input type="radio" name="rtoMode" value="seller_return" checked class="accent-cyan-400" />
+                  <div>
+                    <p class="text-xs font-bold text-white">Return to Seller Warehouse</p>
+                    <p class="text-[10px] text-white/50">Undelivered items sent back to you</p>
+                  </div>
+                </label>
+                <label class="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:border-cyan-400/40">
+                  <input type="radio" name="rtoMode" value="marketplace_liquidate" class="accent-cyan-400" />
+                  <div>
+                    <p class="text-xs font-bold text-white">Marketplace Hub Restock</p>
+                    <p class="text-[10px] text-white/50">OrderFlow inspects and restocks</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div class="pt-3 flex justify-between">
+              <button type="button" id="btnBackToStep1" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">← Back</button>
+              <button type="button" id="btnToStep3" class="btn-neon text-xs font-bold px-5 py-2.5 cursor-pointer">Next: Account Credentials →</button>
+            </div>
+          </div>
+
+          <!-- STEP 3: Account & Security -->
+          <div id="kycStep3" class="space-y-4 hidden">
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Official Store Email (Optional)</label>
+              <input id="kycEmail" type="email" placeholder="contact@yourbrand.com" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+              <p class="text-[10px] text-white/40 mt-1">If empty, your generated ID will be used as store email</p>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Set Password *</label>
+              <input id="kycPassword" required type="password" minlength="4" placeholder="At least 4 characters" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+
+            <!-- KYC Verification Notice -->
+            <div class="glass p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs">
+              <div class="flex items-start gap-2.5">
+                <span class="text-base text-amber-400">🛡️</span>
+                <div class="text-[11px] text-white/80 leading-relaxed">
+                  <p class="font-bold text-amber-300 mb-0.5">Admin Verification Required</p>
+                  Upon submission, your store application will be reviewed by platform administrators. You will receive your permanent 7-Digit Seller ID immediately, but cannot add products until approved.
+                </div>
+              </div>
+            </div>
+
+            <div class="pt-3 flex justify-between">
+              <button type="button" id="btnBackToStep2" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">← Back</button>
+              <button type="submit" class="btn-neon text-xs font-bold px-6 py-2.5 cursor-pointer">Submit Application for Verification 🚀</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  // Step switching handlers
+  const step1 = document.getElementById("kycStep1");
+  const step2 = document.getElementById("kycStep2");
+  const step3 = document.getElementById("kycStep3");
+  const pill1 = document.getElementById("kycStep1Pill");
+  const pill2 = document.getElementById("kycStep2Pill");
+  const pill3 = document.getElementById("kycStep3Pill");
+
+  document.getElementById("btnToStep2").onclick = ()=>{
+    const bName = document.getElementById("kycBrandName").value.trim();
+    const sName = document.getElementById("kycSellerName").value.trim();
+    const stateVal = document.getElementById("kycState").value;
+    const phone = document.getElementById("kycPhone").value.trim();
+    if(!bName || !sName || !stateVal || !phone){
+      toast("Please complete all required fields in Step 1", "warning");
+      return;
+    }
+    step1.classList.add("hidden");
+    step2.classList.remove("hidden");
+    pill1.className = "flex-1 py-1.5 px-3 rounded-lg bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-bold text-center";
+    pill2.className = "flex-1 py-1.5 px-3 rounded-lg bg-cyan-500/20 border border-cyan-400 text-cyan-300 font-bold text-center";
+  };
+
+  document.getElementById("btnBackToStep1").onclick = ()=>{
+    step2.classList.add("hidden");
+    step1.classList.remove("hidden");
+    pill2.className = "flex-1 py-1.5 px-3 rounded-lg bg-white/5 border border-white/10 text-white/40 font-medium text-center";
+    pill1.className = "flex-1 py-1.5 px-3 rounded-lg bg-cyan-500/20 border border-cyan-400 text-cyan-300 font-bold text-center";
+  };
+
+  document.getElementById("btnToStep3").onclick = ()=>{
+    const addr = document.getElementById("kycAddress").value.trim();
+    if(!addr){
+      toast("Please provide your stock / warehouse address", "warning");
+      return;
+    }
+    step2.classList.add("hidden");
+    step3.classList.remove("hidden");
+    pill2.className = "flex-1 py-1.5 px-3 rounded-lg bg-emerald-500/20 border border-emerald-400 text-emerald-300 font-bold text-center";
+    pill3.className = "flex-1 py-1.5 px-3 rounded-lg bg-cyan-500/20 border border-cyan-400 text-cyan-300 font-bold text-center";
+  };
+
+  document.getElementById("btnBackToStep2").onclick = ()=>{
+    step3.classList.add("hidden");
+    step2.classList.remove("hidden");
+    pill3.className = "flex-1 py-1.5 px-3 rounded-lg bg-white/5 border border-white/10 text-white/40 font-medium text-center";
+    pill2.className = "flex-1 py-1.5 px-3 rounded-lg bg-cyan-500/20 border border-cyan-400 text-cyan-300 font-bold text-center";
+  };
+
+  document.getElementById("sellerKycForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const brand_name = document.getElementById("kycBrandName").value.trim();
+    const name = document.getElementById("kycSellerName").value.trim();
+    const stateVal = document.getElementById("kycState").value;
+    const phone = document.getElementById("kycPhone").value.trim();
+    const product_category = document.getElementById("kycCategory").value;
+    const brand_description = document.getElementById("kycBrandDesc").value.trim();
+    const stock_address = document.getElementById("kycAddress").value.trim();
+    const shipping_mode = document.querySelector('input[name="shippingMode"]:checked')?.value || "marketplace";
+    const order_acceptance = document.querySelector('input[name="orderAccept"]:checked')?.value || "auto";
+    const rto_mode = document.querySelector('input[name="rtoMode"]:checked')?.value || "seller_return";
+    const email = document.getElementById("kycEmail").value.trim();
+    const password = document.getElementById("kycPassword").value;
+
+    try{
+      const data = await api("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({
+          name, email, password, role: "seller",
+          brand_name, phone, state: stateVal,
+          brand_description, product_category,
+          shipping_mode, stock_address,
+          order_acceptance, rto_mode
+        })
+      });
+      closeModal();
+      openKycPendingModal(data.generated_id, brand_name);
+    }catch(err){
+      toast(err.message, "error");
+    }
+  };
+}
+
+function openKycPendingModal(generatedId, brandName){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-8 w-full max-w-md pop-in bg-[#070b22]/98 text-center relative z-50">
+        <div class="w-16 h-16 rounded-full bg-amber-500/20 border border-amber-400/50 flex items-center justify-center mx-auto mb-4">
+          <span class="text-3xl">🛡️</span>
+        </div>
+        <span class="text-[10px] uppercase font-bold tracking-wider text-amber-300 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/30">Verification Pending</span>
+        <h3 class="text-xl font-bold text-white mt-2 mb-1">Application Received!</h3>
+        <p class="text-xs text-white/60 mb-5">Your seller account for <strong class="text-white">${brandName}</strong> has been submitted to the platform administrator.</p>
+
+        <div class="glass p-4 rounded-xl border border-cyan-500/30 mb-5 text-left">
+          <p class="text-[10px] uppercase tracking-wider text-cyan-300 font-bold mb-1">Your Permanent 7-Digit Seller ID:</p>
+          <p class="text-2xl font-mono font-bold text-white tracking-widest">${generatedId}</p>
+          <p class="text-[11px] text-white/50 mt-1">Please save this ID. Once the admin approves your account, use this ID and your password to sign in to Seller Hub.</p>
+        </div>
+
+        <button onclick="closeModal(); document.getElementById('roleSellerBtn').click();" class="btn-neon w-full text-xs font-bold py-2.5 cursor-pointer">
+          Done · Return to Sign In
+        </button>
+      </div>
+    </div>`;
+}
+
+/* ================= ADMIN SETUP & APPLY MODALS ================= */
+async function openAdminSetupModal(){
+  try{
+    const check = await api("/admin/setup");
+  }catch(e){
+    toast("Admin already exists! Setup is disabled.", "warning");
+    return;
+  }
+
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-8 w-full max-w-md pop-in bg-[#070b22]/98 relative z-50">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <span class="text-[10px] uppercase font-bold tracking-wider text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">Initial Platform Bootstrap</span>
+            <h3 class="text-xl font-bold text-white mt-1">First-Time Admin Setup</h3>
+            <p class="text-xs text-white/50">Creates the initial Master Founder Admin account</p>
+          </div>
+          <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1 text-lg">✕</button>
+        </div>
+
+        <div class="glass p-3 rounded-xl border border-cyan-500/30 bg-cyan-500/10 mb-4 text-xs text-white/80 leading-relaxed">
+          ⚡ <strong>Important:</strong> There is no default admin. The credentials you enter here will become the primary administrator with supreme approval authority.
+        </div>
+
+        <form id="adminSetupForm" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Admin Full Name *</label>
+            <input id="adminSetupName" required type="text" placeholder="e.g. Lead Administrator" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Official Email Address *</label>
+            <input id="adminSetupEmail" required type="email" placeholder="admin@orderflow.ai" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Set Strong Password (min 8 chars) *</label>
+            <input id="adminSetupPassword" required type="password" minlength="8" placeholder="••••••••••••" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div class="pt-2 flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="btn-neon text-xs font-bold px-5 py-2.5 cursor-pointer">Create Master Admin 🚀</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("adminSetupForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const name = document.getElementById("adminSetupName").value.trim();
+    const email = document.getElementById("adminSetupEmail").value.trim();
+    const password = document.getElementById("adminSetupPassword").value;
+
+    try{
+      const data = await api("/admin/setup", {
+        method: "POST",
+        body: JSON.stringify({ name, email, password })
+      });
+      closeModal();
+      alert(`🎉 Master Admin Account Created!\n\nYour 7-Digit Admin ID is: ${data.generated_id}\n\nPlease save this ID to log in anytime!`);
+      // Auto-fill and login
+      document.getElementById("roleAdminBtn").click();
+      document.getElementById("loginIdInput").value = data.generated_id;
+      document.getElementById("loginPwInput").value = password;
+      await performIdLogin(data.generated_id, password, "admin");
+    }catch(err){ toast(err.message, "error"); }
+  };
+}
+
+function openAdminApplyModal(){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-8 w-full max-w-md pop-in bg-[#070b22]/98 relative z-50">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <span class="text-[10px] uppercase font-bold tracking-wider text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">Admin Access Request</span>
+            <h3 class="text-xl font-bold text-white mt-1">Apply for Admin Access</h3>
+            <p class="text-xs text-white/50">Requires approval from an existing active admin</p>
+          </div>
+          <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer p-1 text-lg">✕</button>
+        </div>
+
+        <form id="adminApplyForm" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Your Full Name *</label>
+            <input id="adminApplyName" required type="text" placeholder="e.g. John Operations" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Work Email *</label>
+            <input id="adminApplyEmail" required type="email" placeholder="john@company.com" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Set Password (min 8 chars) *</label>
+            <input id="adminApplyPassword" required type="password" minlength="8" placeholder="••••••••••••" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Reason for Admin Privileges</label>
+            <textarea id="adminApplyReason" rows="2" placeholder="e.g. Operations manager reviewing seller verification..." class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"></textarea>
+          </div>
+
+          <div class="pt-2 flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="btn-neon text-xs font-bold px-5 py-2.5 cursor-pointer">Submit Application</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("adminApplyForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const name = document.getElementById("adminApplyName").value.trim();
+    const email = document.getElementById("adminApplyEmail").value.trim();
+    const password = document.getElementById("adminApplyPassword").value;
+    const reason = document.getElementById("adminApplyReason").value.trim();
+
+    try{
+      const data = await api("/api/auth/admin-register", {
+        method: "POST",
+        body: JSON.stringify({ name, email, password, reason })
+      });
+      closeModal();
+      alert(`🎉 Application Submitted!\n\nYour 7-Digit Admin ID is: ${data.generated_id}\n\nPlease have an active platform administrator approve your ID before signing in.`);
+      toast("Admin application submitted for review", "info");
     }catch(err){ toast(err.message, "error"); }
   };
 }
@@ -624,29 +1260,50 @@ function openRegisterModal(role){
 function navBar(tabs, activeTab, onSwitch){
   const otherRole = state.role === "customer" ? "seller" : "customer";
   const otherRoleLabel = state.role === "customer" ? "🏪 Open Seller Hub" : "🛒 Open Customer View";
+  
+  let roleBadgeClass = "bg-cyan-500/20 text-cyan-300 border-cyan-500/30";
+  let roleBadgeText = `CUSTOMER: ${state.user.name} (#${state.user.id})`;
+  if(state.role === "seller"){
+    roleBadgeClass = "bg-purple-500/20 text-purple-300 border-purple-500/30";
+    roleBadgeText = `STORE: ${state.user.name} (#${state.user.id})`;
+  } else if(state.role === "admin"){
+    roleBadgeClass = "bg-rose-500/20 text-rose-300 border-rose-500/30";
+    roleBadgeText = `ADMIN: ${state.user.name} (#${state.user.id})`;
+  }
+
   return `
   <div class="sticky top-0 z-30 px-4 pt-4 pb-3">
     <div class="glass flex items-center justify-between px-5 py-3 max-w-7xl mx-auto gap-4 flex-wrap">
       <div class="flex items-center gap-2.5 font-semibold display">
         <span class="text-cyan-400 text-lg">⚡</span>
         <span class="text-white">OrderFlow AI</span>
-        <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${state.role==='seller'?'bg-purple-500/20 text-purple-300 border border-purple-500/30':'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'}">
-          ${state.role === 'seller' ? `STORE: ${state.user.name} (#${state.user.id})` : `CUSTOMER: ${state.user.name} (#${state.user.id})`}
+        <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider border ${roleBadgeClass}">
+          ${roleBadgeText}
         </span>
       </div>
       <div class="flex gap-2 overflow-x-auto scrollbar-thin">
         ${tabs.map(t=>`<button class="tab ${t===activeTab?'active':''}" data-tab="${t}">${t}</button>`).join("")}
       </div>
       <div class="flex items-center gap-3">
+        <button onclick="toggleTheme()" class="theme-toggle-btn text-xs px-2.5 py-1.5 rounded-xl border border-white/10 hover:border-cyan-400/40 bg-white/5 text-white/70 transition-all cursor-pointer flex items-center gap-1">
+          <span>${state.currentTheme==='light'?'☀️ Light':'🌙 Dark'}</span>
+        </button>
         ${state.role === 'seller' ? `
           <button id="soundToggleBtn" class="text-xs px-2.5 py-1.5 rounded-xl border ${state.soundEnabled?'bg-emerald-500/10 text-emerald-300 border-emerald-500/30':'bg-white/5 text-white/40 border-white/10'} transition-all cursor-pointer flex items-center gap-1.5">
             <span>${state.soundEnabled ? '🔔 Chime: ON' : '🔕 Chime: OFF'}</span>
           </button>
         ` : ''}
-        <button id="openOtherRoleBtn" class="text-xs px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:shadow-cyan-500/20" title="Open in another window for live sync testing">
-          <span>${otherRoleLabel}</span>
-          <span class="text-[10px] text-white/50">↗</span>
-        </button>
+        ${state.role !== 'admin' ? `
+          <button id="openOtherRoleBtn" class="text-xs px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:shadow-cyan-500/20" title="Open in another window for live sync testing">
+            <span>${otherRoleLabel}</span>
+            <span class="text-[10px] text-white/50">↗</span>
+          </button>
+        ` : `
+          <button id="openOtherRoleBtn" class="text-xs px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:shadow-cyan-500/20" title="Open Customer View in new tab">
+            <span>🛒 Live Marketplace</span>
+            <span class="text-[10px] text-white/50">↗</span>
+          </button>
+        `}
         <img src="${state.user.picture||'https://api.dicebear.com/7.x/identicon/svg?seed='+state.user.name}" class="w-8 h-8 rounded-full border border-white/20 object-cover" />
         <button id="logoutBtn" class="text-xs text-white/40 hover:text-white/80 cursor-pointer">Sign out</button>
       </div>
@@ -661,8 +1318,12 @@ function wireNav(onSwitch){
   const openOther = document.getElementById("openOtherRoleBtn");
   if(openOther){
     openOther.onclick = ()=>{
-      const otherRole = state.role === "customer" ? "seller" : "customer";
-      window.open(window.location.origin + window.location.pathname + `?role=${otherRole}`, "_blank");
+      if(state.role === "admin"){
+        window.open(window.location.origin + window.location.pathname + `?role=customer`, "_blank");
+      } else {
+        const otherRole = state.role === "customer" ? "seller" : "customer";
+        window.open(window.location.origin + window.location.pathname + `?role=${otherRole}`, "_blank");
+      }
     };
   }
   const soundBtn = document.getElementById("soundToggleBtn");
@@ -677,7 +1338,12 @@ function wireNav(onSwitch){
   }
   document.getElementById("logoutBtn").onclick = ()=>{
     if(state.ws) state.ws.close();
-    Object.assign(state, {token:null,user:null,role:null,products:[],cart:[],orders:[],ws:null});
+    hideSupportFab();
+    closeSupportDrawer();
+    Object.assign(state, {
+      token:null, user:null, role:null, products:[], cart:[], orders:[], ws:null,
+      adminStats:null, pendingSellers:[], pendingAdmins:[], adminUsers:[], adminTickets:[]
+    });
     if(window.history.replaceState) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
@@ -1282,13 +1948,14 @@ async function enterSeller(isNewStore=false){
 
 async function renderSeller(tab="Overview", isNewStore=false){
   const app = document.getElementById("app");
-  app.innerHTML = navBar(["Overview","Live Orders","Products & Stock","Coupons","Kanban"], tab, (t)=>renderSeller(t)) + `<div id="sellerBody" class="max-w-7xl mx-auto px-4 pb-16"></div>`;
+  app.innerHTML = navBar(["Overview","Live Orders","Products & Stock","Coupons","Kanban","Branding"], tab, (t)=>renderSeller(t)) + `<div id="sellerBody" class="max-w-7xl mx-auto px-4 pb-16"></div>`;
   wireNav((t)=>renderSeller(t));
 
   if(tab==="Overview") await renderSellerOverview(isNewStore);
   else if(tab==="Live Orders") renderSellerOrders();
   else if(tab==="Products & Stock") renderInventory();
   else if(tab==="Coupons") await renderSellerCoupons();
+  else if(tab==="Branding") await renderSellerBranding();
   else renderKanban();
 }
 
@@ -2512,8 +3179,1623 @@ function openCancelModal(orderId){
   };
 }
 
+/* ================= TAX INVOICE & PDF ================= */
+async function downloadOrderInvoice(orderId){
+  try {
+    toast(`Generating Tax Invoice PDF for #${orderId}...`, "info");
+    const res = await fetch(`${CONFIG.API_BASE}/api/orders/${orderId}/invoice`, {
+      headers: { "Authorization": "Bearer " + state.token }
+    });
+    if(!res.ok){
+      const err = await res.json().catch(()=>({}));
+      throw new Error(err.detail || "Failed to download invoice");
+    }
+    const contentType = res.headers.get("content-type");
+    if(contentType && contentType.includes("application/pdf")){
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Invoice_${orderId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast("Invoice PDF downloaded!", "success");
+    } else {
+      const data = await res.json();
+      alert(`📄 Invoice INV-${orderId}\n\nAmount: ₹${data.financials?.grand_total || 'N/A'}\nTaxable: ₹${data.financials?.taxable_value || 'N/A'}\nGST (18%): ₹${data.financials?.gst_total || 'N/A'}`);
+    }
+  } catch(e){
+    toast("Invoice download: " + e.message, "error");
+  }
+}
+
+async function openInvoiceModal(orderId){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-8 w-full max-w-lg pop-in bg-[#070b22]/98 text-center relative z-50">
+        <div class="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center mx-auto mb-3">
+          <span class="text-2xl">📄</span>
+        </div>
+        <h3 class="text-lg font-bold text-white mb-1">GST Tax Invoice #${orderId}</h3>
+        <p class="text-xs text-white/50 mb-4">Official GST compliant digital tax invoice</p>
+
+        <div id="invoicePreviewContent" class="text-xs text-white/70 py-6">
+          <span class="animate-pulse">Loading invoice calculations...</span>
+        </div>
+
+        <div class="pt-2 flex justify-end gap-2">
+          <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Close</button>
+          <button id="btnDownloadPdf" class="btn-neon text-xs font-bold px-5 py-2.5 cursor-pointer flex items-center gap-1.5">
+            <span>📥 Download PDF Invoice</span>
+          </button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById("btnDownloadPdf").onclick = ()=> downloadOrderInvoice(orderId);
+
+  try {
+    const inv = await api(`/api/orders/${orderId}/invoice-data`);
+    const fin = inv.financials || {};
+    document.getElementById("invoicePreviewContent").innerHTML = `
+      <div class="glass p-4 rounded-xl border border-white/10 text-left space-y-2 mb-2 font-mono text-[11px]">
+        <div class="flex justify-between border-b border-white/10 pb-1.5 text-white/80">
+          <span>Invoice No: <strong>${inv.invoice_number}</strong></span>
+          <span>Date: <strong>${(inv.order?.created_at || '').slice(0, 10)}</strong></span>
+        </div>
+        <div class="flex justify-between text-white/70">
+          <span>Seller: ${inv.seller?.name || 'Verified Store'}</span>
+          <span>Customer: ${inv.customer?.name || 'Customer'}</span>
+        </div>
+        <div class="py-2 border-y border-white/5 space-y-1">
+          ${(inv.order?.items || []).map(it => `
+            <div class="flex justify-between">
+              <span>${it.name} × ${it.qty}</span>
+              <span>₹${(it.price * it.qty).toLocaleString()}</span>
+            </div>
+          `).join('')}
+        </div>
+        <div class="space-y-1 pt-1 text-white/60">
+          <div class="flex justify-between"><span>Subtotal:</span><span>₹${fin.subtotal || 0}</span></div>
+          <div class="flex justify-between text-emerald-400"><span>Discount:</span><span>-₹${fin.discount || 0}</span></div>
+          <div class="flex justify-between"><span>Taxable Value:</span><span>₹${fin.taxable_value || 0}</span></div>
+          <div class="flex justify-between"><span>CGST (9%) + SGST (9%):</span><span>₹${fin.gst_total || 0}</span></div>
+          <div class="flex justify-between text-base font-bold text-cyan-300 pt-1 border-t border-white/10">
+            <span>Grand Total:</span><span>₹${fin.grand_total || 0}</span>
+          </div>
+        </div>
+      </div>`;
+  } catch(e){
+    document.getElementById("invoicePreviewContent").innerHTML = `<p class="text-red-400 text-xs">Error loading invoice data: ${e.message}</p>`;
+  }
+}
+
+/* ================= SELLER STORE BRANDING ================= */
+async function renderSellerBranding(){
+  const body = document.getElementById("sellerBody");
+  if(!body) return;
+
+  let profile = state.user;
+  try {
+    profile = await api(`/api/sellers/${state.user.id}/profile`);
+  } catch(e){}
+
+  body.innerHTML = `
+    <div class="glass glow-border p-6 mb-6 fade-up">
+      <div class="flex justify-between items-center mb-6">
+        <div>
+          <span class="text-[10px] uppercase font-bold tracking-wider text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">Storefront Identity</span>
+          <h2 class="text-2xl font-bold text-white mt-1">Store Branding & Customization</h2>
+          <p class="text-xs text-white/50">Personalize your brand colors, logo, and banner on OrderFlow Marketplace</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+            Live Store Status: Active ⚡
+          </span>
+        </div>
+      </div>
+
+      <!-- Live Preview Card -->
+      <div class="glass p-5 rounded-2xl mb-8 border border-white/10 relative overflow-hidden" style="border-left: 6px solid ${profile.brand_color || '#6c63ff'};">
+        <div id="brandingBannerPreview" class="h-28 rounded-xl bg-gradient-to-r from-purple-900/60 to-cyan-900/60 flex items-center justify-center mb-4 relative overflow-hidden border border-white/10">
+          ${profile.store_banner ? `<img src="${profile.store_banner}" class="w-full h-full object-cover" />` : `<span class="text-xs text-white/40 font-mono">Store Banner Preview (Default Gradient)</span>`}
+        </div>
+        <div class="flex items-center gap-4">
+          <div id="brandingLogoPreview" class="w-16 h-16 rounded-2xl border-2 border-white/20 bg-white/5 overflow-hidden flex items-center justify-center flex-shrink-0" style="box-shadow: 0 0 20px ${profile.brand_color || '#6c63ff'}40;">
+            ${profile.store_logo ? `<img src="${profile.store_logo}" class="w-full h-full object-cover" />` : `<span class="text-2xl">🏪</span>`}
+          </div>
+          <div>
+            <h3 id="brandingNamePreview" class="text-lg font-bold text-white">${profile.brand_name || profile.name}</h3>
+            <p id="brandingDescPreview" class="text-xs text-white/60">${profile.brand_description || 'Official verified seller store on OrderFlow AI'}</p>
+            <div class="flex gap-2 mt-1">
+              <span class="text-[10px] px-2 py-0.5 rounded bg-white/5 border border-white/10 text-white/50 font-mono">Seller ID: #${profile.id}</span>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">Verified Merchant ✓</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Branding Form -->
+      <form id="brandingForm" class="space-y-5 max-w-2xl">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Brand Primary Accent Color</label>
+            <div class="flex items-center gap-3">
+              <input type="color" id="brandColorPicker" value="${profile.brand_color || '#6c63ff'}" class="w-10 h-10 rounded-xl cursor-pointer bg-transparent border-0" />
+              <input type="text" id="brandColorHex" value="${profile.brand_color || '#6c63ff'}" class="flex-1 bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Brand / Store Name</label>
+            <input type="text" id="brandNameInput" value="${profile.brand_name || profile.name}" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-white/80 mb-1">Store Logo Image URL</label>
+          <input type="url" id="brandLogoUrl" value="${profile.store_logo || ''}" placeholder="https://example.com/logo.png" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+          <p class="text-[10px] text-white/40 mt-1">Recommended size: 200x200 PNG or SVG</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-white/80 mb-1">Store Banner Image URL</label>
+          <input type="url" id="brandBannerUrl" value="${profile.store_banner || ''}" placeholder="https://example.com/banner.jpg" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+          <p class="text-[10px] text-white/40 mt-1">Recommended size: 1200x300 high resolution landscape banner</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-white/80 mb-1">Store Tagline / Bio</label>
+          <textarea id="brandDescInput" rows="2" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400">${profile.brand_description || ''}</textarea>
+        </div>
+
+        <button type="submit" class="btn-neon font-bold text-xs px-6 py-3 cursor-pointer">
+          💾 Save & Publish Branding Changes
+        </button>
+      </form>
+    </div>`;
+
+  const colorPicker = document.getElementById("brandColorPicker");
+  const colorHex = document.getElementById("brandColorHex");
+  if(colorPicker && colorHex){
+    colorPicker.oninput = (e)=>{ colorHex.value = e.target.value; };
+    colorHex.oninput = (e)=>{ colorPicker.value = e.target.value; };
+  }
+
+  document.getElementById("brandingForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const brand_color = colorHex.value.trim();
+    const brand_name = document.getElementById("brandNameInput").value.trim();
+    const store_logo = document.getElementById("brandLogoUrl").value.trim();
+    const store_banner = document.getElementById("brandBannerUrl").value.trim();
+    const brand_description = document.getElementById("brandDescInput").value.trim();
+
+    try {
+      const updated = await api("/api/sellers/branding", {
+        method: "PATCH",
+        body: JSON.stringify({ brand_color, brand_name, store_logo, store_banner, brand_description })
+      });
+      state.user = { ...state.user, ...updated };
+      toast("Store branding updated successfully!", "success");
+      renderSellerBranding();
+    } catch(err){
+      toast("Failed to update branding: " + err.message, "error");
+    }
+  };
+}
+
+/* ================= SMART SUPPORT CHAT WIDGET ================= */
+function renderSupportFab(){
+  const fab = document.getElementById("supportFabContainer");
+  if(!fab) return;
+  fab.innerHTML = `
+    <button onclick="openSupportDrawer()" class="glass glow-border px-4 py-3 rounded-full flex items-center gap-2.5 shadow-2xl hover:scale-105 transition-transform cursor-pointer border-cyan-400/50 bg-gradient-to-r from-cyan-950/80 to-purple-950/80">
+      <span class="text-xl">💬</span>
+      <span class="text-xs font-bold text-white hidden sm:inline">24/7 Smart Care</span>
+      <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+    </button>`;
+}
+
+function hideSupportFab(){
+  const fab = document.getElementById("supportFabContainer");
+  if(fab) fab.innerHTML = "";
+}
+
+function openSupportDrawer(){
+  state.supportDrawerOpen = true;
+  const drawer = document.getElementById("supportDrawer");
+  drawer.dataset.open = "true";
+  drawer.classList.remove("translate-x-full");
+  renderSupportDrawerContent();
+}
+
+function closeSupportDrawer(){
+  state.supportDrawerOpen = false;
+  const drawer = document.getElementById("supportDrawer");
+  drawer.dataset.open = "false";
+  drawer.classList.add("translate-x-full");
+}
+
+function renderSupportDrawerContent(){
+  const drawer = document.getElementById("supportDrawer");
+  if(!drawer) return;
+
+  if(state.activeUserTicketId){
+    renderSupportChatMessages();
+    return;
+  }
+
+  drawer.innerHTML = `
+    <div class="glass glow-border h-full flex flex-col justify-between p-5 bg-[#070b22]/98 shadow-2xl overflow-y-auto scrollbar-thin">
+      <div>
+        <!-- Drawer Header -->
+        <div class="flex justify-between items-center pb-4 border-b border-white/10 mb-4">
+          <div class="flex items-center gap-2.5">
+            <div class="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-400/30 flex items-center justify-center">
+              <span class="text-xl">⚡</span>
+            </div>
+            <div>
+              <h3 class="text-sm font-bold text-white">OrderFlow Smart Care</h3>
+              <p class="text-[10px] text-emerald-400 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-ping"></span>
+                Support Agents & Admin Online
+              </p>
+            </div>
+          </div>
+          <button onclick="closeSupportDrawer()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+        </div>
+
+        <!-- Greeting -->
+        <div class="glass p-3.5 rounded-2xl mb-4 border border-cyan-500/20 bg-gradient-to-r from-cyan-950/40 to-purple-950/40">
+          <p class="text-xs text-white font-medium">Hello ${state.user ? state.user.name : 'there'}! 👋</p>
+          <p class="text-[11px] text-white/60 mt-1">We're here to make your experience completely seamless. How can we support you today?</p>
+        </div>
+
+        <!-- Predefined Pleasing & Sympathetic Quick Options -->
+        <div class="space-y-2 mb-5">
+          <p class="text-[10px] uppercase font-bold tracking-wider text-white/50">Instant Solutions:</p>
+          
+          <button onclick="showSupportQuickSolution('track')" class="w-full text-left p-3 rounded-xl glass hover:border-cyan-400/50 transition-all cursor-pointer flex items-center justify-between text-xs">
+            <span class="flex items-center gap-2"><span>📦</span> <span class="font-medium text-white">Where is my order?</span></span>
+            <span class="text-white/40">→</span>
+          </button>
+
+          <button onclick="showSupportQuickSolution('cancel')" class="w-full text-left p-3 rounded-xl glass hover:border-cyan-400/50 transition-all cursor-pointer flex items-center justify-between text-xs">
+            <span class="flex items-center gap-2"><span>❌</span> <span class="font-medium text-white">I want to cancel an order</span></span>
+            <span class="text-white/40">→</span>
+          </button>
+
+          <button onclick="showSupportQuickSolution('return')" class="w-full text-left p-3 rounded-xl glass hover:border-cyan-400/50 transition-all cursor-pointer flex items-center justify-between text-xs">
+            <span class="flex items-center gap-2"><span>🔄</span> <span class="font-medium text-white">Return or Replacement Policy</span></span>
+            <span class="text-white/40">→</span>
+          </button>
+
+          <button onclick="showSupportQuickSolution('payment')" class="w-full text-left p-3 rounded-xl glass hover:border-cyan-400/50 transition-all cursor-pointer flex items-center justify-between text-xs">
+            <span class="flex items-center gap-2"><span>💳</span> <span class="font-medium text-white">Payment or Refund question</span></span>
+            <span class="text-white/40">→</span>
+          </button>
+        </div>
+
+        <!-- Quick Solution Dynamic Modal Area -->
+        <div id="quickSolutionArea" class="hidden glass p-4 rounded-xl border border-cyan-500/30 mb-4 bg-white/5 text-xs text-white/80 leading-relaxed"></div>
+
+        <!-- File a Complaint / Talk to Admin Option -->
+        <div class="pt-3 border-t border-white/10">
+          <p class="text-[10px] uppercase font-bold tracking-wider text-amber-400 mb-2">Need Direct Resolution?</p>
+          <button onclick="openSupportComplaintForm()" class="btn-warning w-full py-2.5 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-lg">
+            <span>⚠️ Report an Issue / File a Complaint</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Past Tickets Link -->
+      <div class="pt-4 border-t border-white/10 text-center">
+        <button onclick="loadUserTicketsList()" class="text-[11px] text-cyan-300 hover:underline cursor-pointer">
+          📋 View My Support Ticket History →
+        </button>
+      </div>
+    </div>`;
+}
+
+function showSupportQuickSolution(key){
+  const area = document.getElementById("quickSolutionArea");
+  if(!area) return;
+  area.classList.remove("hidden");
+
+  if(key === 'track'){
+    area.innerHTML = `
+      <div class="space-y-2">
+        <p class="font-bold text-cyan-300 flex items-center gap-1.5">📦 Live Order Tracking Assistance</p>
+        <p>We completely understand how eager you are to receive your package! Every single order on OrderFlow is tracked in real-time with second-by-second updates.</p>
+        <p class="text-white/60">Simply open your <strong>"My Orders"</strong> tab to see the dynamic visual timeline and estimated delivery time. If there is ever an unavoidable weather or logistics delay, our dispatch team posts an immediate alert with reasons.</p>
+        <button onclick="closeSupportDrawer(); if(state.role==='customer') renderCustomer('My Orders');" class="btn-neon text-[11px] px-3 py-1.5 mt-2 cursor-pointer">Go to My Orders →</button>
+      </div>`;
+  } else if(key === 'cancel'){
+    area.innerHTML = `
+      <div class="space-y-2">
+        <p class="font-bold text-amber-300 flex items-center gap-1.5">❌ Order Cancellation Guarantee</p>
+        <p>We are so sorry things didn't work out as planned! You have complete freedom to cancel any order while it is in the <strong>"Placed"</strong> status.</p>
+        <p class="text-white/60">Cancelling immediately refunds your payment and automatically restores the inventory stock. Just tap "Cancel Order" on the order card.</p>
+        <button onclick="closeSupportDrawer(); if(state.role==='customer') renderCustomer('My Orders');" class="btn-neon text-[11px] px-3 py-1.5 mt-2 cursor-pointer">View Orders to Cancel →</button>
+      </div>`;
+  } else if(key === 'return'){
+    area.innerHTML = `
+      <div class="space-y-2">
+        <p class="font-bold text-emerald-300 flex items-center gap-1.5">🔄 7-Day Hassle-Free Return / Exchange</p>
+        <p>Your satisfaction is our absolute priority. If you receive an item that is damaged, defective, or different from described, you are 100% protected!</p>
+        <p class="text-white/60">We arrange doorstep courier pickup and issue an immediate replacement or full money refund. If you'd like us to initiate an exchange right now, please file a ticket below.</p>
+        <button onclick="openSupportComplaintForm()" class="btn-neon text-[11px] px-3 py-1.5 mt-2 cursor-pointer">Request Return / Exchange →</button>
+      </div>`;
+  } else if(key === 'payment'){
+    area.innerHTML = `
+      <div class="space-y-2">
+        <p class="font-bold text-cyan-300 flex items-center gap-1.5">💳 Payment & Refund Security</p>
+        <p>All payments on OrderFlow are protected by enterprise 256-bit bank encryption. We never hold unverified charges.</p>
+        <p class="text-white/60">If money was debited from your bank but your order didn't confirm, banks automatically reconcile the balance within 2-4 hours. You can also chat directly with our admin operations team below.</p>
+      </div>`;
+  }
+}
+
+function openSupportComplaintForm(){
+  const drawer = document.getElementById("supportDrawer");
+  if(!drawer) return;
+
+  drawer.innerHTML = `
+    <div class="glass glow-border h-full flex flex-col justify-between p-5 bg-[#070b22]/98 shadow-2xl overflow-y-auto scrollbar-thin">
+      <div>
+        <div class="flex justify-between items-center pb-3 border-b border-white/10 mb-4">
+          <div class="flex items-center gap-2">
+            <button onclick="renderSupportDrawerContent()" class="text-xs text-white/50 hover:text-white cursor-pointer mr-1">←</button>
+            <h3 class="text-sm font-bold text-white">Escalate Complaint / Support</h3>
+          </div>
+          <button onclick="closeSupportDrawer()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+        </div>
+
+        <!-- MANDATORY SINCERE APOLOGY FIRST -->
+        <div class="glass p-4 rounded-xl border border-rose-500/40 bg-gradient-to-r from-rose-950/40 to-purple-950/40 mb-4 fade-up">
+          <div class="flex items-start gap-2.5">
+            <span class="text-xl">🙏</span>
+            <div class="text-xs leading-relaxed text-white">
+              <p class="font-bold text-rose-300 mb-1">We are truly sorry for this experience 🙏</p>
+              Your satisfaction is our absolute priority, and we sincerely apologize for any inconvenience, delay, or frustration caused. Please share the details below so our admin team can step in immediately and make this right for you.
+            </div>
+          </div>
+        </div>
+
+        <!-- Complaint Form -->
+        <form id="complaintForm" class="space-y-3.5 text-xs">
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Issue Category *</label>
+            <select id="compCategory" class="w-full bg-[#0a0f2b] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400">
+              <option value="Delivery Delay">⏱️ Delivery Delay / ETA Exceeded</option>
+              <option value="Damaged or Wrong Item">📦 Damaged, Missing, or Wrong Item</option>
+              <option value="Payment / Refund Issue">💳 Payment Deducted / Refund Delay</option>
+              <option value="Seller Issue">🏪 Seller Communication / Fulfillment Problem</option>
+              <option value="App or Website Issue">⚡ Technical Glitch or Bug</option>
+              <option value="Other Complaint">📝 Other General Grievance</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">What went wrong? (Detailed description) *</label>
+            <textarea id="compDesc" required rows="3" placeholder="Please describe the issue in detail, order ID if applicable..." class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"></textarea>
+          </div>
+
+          <div>
+            <label class="block font-semibold text-white/80 mb-1.5">How would you rate your experience so far?</label>
+            <div class="flex items-center gap-2 text-xl" id="starRatingContainer">
+              ${[1,2,3,4,5].map(star => `
+                <button type="button" class="star-btn text-white/30 hover:text-amber-400 transition-colors cursor-pointer" data-val="${star}">★</button>
+              `).join('')}
+            </div>
+            <input type="hidden" id="compRating" value="1" />
+          </div>
+
+          <div class="pt-2">
+            <button type="submit" class="btn-neon w-full py-2.5 font-bold text-xs cursor-pointer shadow-xl flex items-center justify-center gap-2">
+              <span>Submit Grievance & Connect Live Chat 🚀</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="pt-3 border-t border-white/5 text-center text-[10px] text-white/40">
+        Your complaint will be directly visible to the Platform Administrator.
+      </div>
+    </div>`;
+
+  let currentStars = 1;
+  const starBtns = drawer.querySelectorAll(".star-btn");
+  starBtns.forEach(btn => {
+    btn.onclick = ()=>{
+      currentStars = +btn.dataset.val;
+      document.getElementById("compRating").value = currentStars;
+      starBtns.forEach((b, idx) => {
+        b.className = idx < currentStars ? "star-btn text-amber-400 cursor-pointer" : "star-btn text-white/30 cursor-pointer";
+      });
+    };
+  });
+  // Default 1 star
+  starBtns[0].className = "star-btn text-amber-400 cursor-pointer";
+
+  document.getElementById("complaintForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const category = document.getElementById("compCategory").value;
+    const description = document.getElementById("compDesc").value.trim();
+    const rating = +document.getElementById("compRating").value;
+
+    try {
+      const data = await api("/api/support/ticket", {
+        method: "POST",
+        body: JSON.stringify({ category, description, rating })
+      });
+      toast(`Support Ticket #${data.ticket_id} opened. Connecting to admin...`, "success");
+      state.activeUserTicketId = data.ticket_id;
+      await loadSupportTicketMessages(data.ticket_id);
+    } catch(err){
+      toast("Error submitting complaint: " + err.message, "error");
+    }
+  };
+}
+
+async function loadSupportTicketMessages(ticketId){
+  state.activeUserTicketId = ticketId;
+  try {
+    state.userTicketMessages = await api(`/api/support/tickets/${ticketId}/messages`);
+  } catch(e){
+    state.userTicketMessages = [];
+  }
+  renderSupportChatMessages();
+}
+
+function renderSupportChatMessages(){
+  const drawer = document.getElementById("supportDrawer");
+  if(!drawer || !state.activeUserTicketId) return;
+
+  drawer.innerHTML = `
+    <div class="glass glow-border h-full flex flex-col justify-between p-4 bg-[#070b22]/98 shadow-2xl">
+      <!-- Header -->
+      <div class="flex justify-between items-center pb-3 border-b border-white/10">
+        <div class="flex items-center gap-2">
+          <button onclick="state.activeUserTicketId=null; renderSupportDrawerContent();" class="text-xs text-white/50 hover:text-white cursor-pointer mr-1">←</button>
+          <div>
+            <h3 class="text-xs font-bold text-white flex items-center gap-1.5">
+              <span>💬 Live Support Desk</span>
+              <span class="font-mono text-cyan-300">#${state.activeUserTicketId}</span>
+            </h3>
+            <span class="text-[10px] text-emerald-400 flex items-center gap-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-ping"></span> Live Admin Channel
+            </span>
+          </div>
+        </div>
+        <button onclick="closeSupportDrawer()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+      </div>
+
+      <!-- Messages Thread -->
+      <div id="userSupportChatThread" class="flex-1 overflow-y-auto py-3 space-y-2.5 scrollbar-thin my-2">
+        ${state.userTicketMessages.length === 0 ? `
+          <div class="text-center py-8 text-xs text-white/40">
+            <span class="text-2xl block mb-2">🙏</span>
+            We've notified the platform administrator. An agent is reviewing your grievance and will reply here in real-time.
+          </div>
+        ` : state.userTicketMessages.map(m => {
+          const isMe = m.sender_id === state.user.id;
+          return `
+            <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'}">
+              <div class="text-[9px] text-white/40 mb-0.5 px-1">${m.sender_name} (${m.sender_role})</div>
+              <div class="max-w-[85%] px-3.5 py-2 rounded-2xl text-xs ${isMe ? 'bg-cyan-500/20 text-cyan-200 rounded-tr-none border border-cyan-400/40' : 'bg-purple-500/20 text-white rounded-tl-none border border-purple-400/40'}">
+                ${m.message}
+              </div>
+              <div class="text-[9px] text-white/30 font-mono mt-0.5 px-1">${(m.timestamp || '').slice(11, 16)}</div>
+            </div>`;
+        }).join('')}
+      </div>
+
+      <!-- Input Form -->
+      <form id="userSupportMsgForm" class="pt-2 border-t border-white/10 flex gap-2">
+        <input id="userSupportMsgInput" required type="text" placeholder="Type message to admin..." class="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+        <button type="submit" class="btn-neon text-xs font-bold px-4 py-2 cursor-pointer">Send</button>
+      </form>
+    </div>`;
+
+  const thread = document.getElementById("userSupportChatThread");
+  if(thread) thread.scrollTop = thread.scrollHeight;
+
+  document.getElementById("userSupportMsgForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const input = document.getElementById("userSupportMsgInput");
+    const text = input.value.trim();
+    if(!text) return;
+    input.value = "";
+
+    try {
+      const newMsg = await api(`/api/support/tickets/${state.activeUserTicketId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ message: text })
+      });
+      state.userTicketMessages.push(newMsg);
+      renderSupportChatMessages();
+    } catch(err){
+      toast("Error sending message: " + err.message, "error");
+    }
+  };
+}
+
+async function loadUserTicketsList(){
+  const drawer = document.getElementById("supportDrawer");
+  if(!drawer) return;
+
+  drawer.innerHTML = `
+    <div class="glass glow-border h-full flex flex-col justify-between p-5 bg-[#070b22]/98 shadow-2xl overflow-y-auto scrollbar-thin">
+      <div>
+        <div class="flex justify-between items-center pb-3 border-b border-white/10 mb-4">
+          <div class="flex items-center gap-2">
+            <button onclick="renderSupportDrawerContent()" class="text-xs text-white/50 hover:text-white cursor-pointer mr-1">←</button>
+            <h3 class="text-sm font-bold text-white">My Support Tickets</h3>
+          </div>
+          <button onclick="closeSupportDrawer()" class="text-white/40 hover:text-white cursor-pointer p-1">✕</button>
+        </div>
+
+        <div id="userTicketsListContainer" class="space-y-2.5">
+          <p class="text-xs text-white/40 text-center py-6">Loading tickets...</p>
+        </div>
+      </div>
+
+      <button onclick="openSupportComplaintForm()" class="btn-neon w-full py-2.5 text-xs font-bold cursor-pointer">
+        ➕ Open New Support Ticket
+      </button>
+    </div>`;
+
+  try {
+    const list = await api("/api/support/my-tickets");
+    const container = document.getElementById("userTicketsListContainer");
+    if(list.length === 0){
+      container.innerHTML = `<p class="text-xs text-white/40 text-center py-6">No support tickets created yet.</p>`;
+    } else {
+      container.innerHTML = list.map(t => `
+        <button onclick="loadSupportTicketMessages('${t.id}')" class="w-full text-left p-3 rounded-xl glass hover:border-cyan-400/50 transition-all cursor-pointer flex flex-col gap-1 text-xs">
+          <div class="flex justify-between items-center">
+            <span class="font-bold text-white">#${t.id} · ${t.category}</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full ${t.status==='resolved'?'bg-emerald-500/20 text-emerald-300':'bg-amber-500/20 text-amber-300'} font-semibold uppercase">${t.status}</span>
+          </div>
+          <p class="text-white/60 line-clamp-1 text-[11px]">${t.description}</p>
+          <span class="text-[9px] text-white/40 font-mono">${(t.created_at || '').slice(0, 10)}</span>
+        </button>
+      `).join('');
+    }
+  } catch(e){
+    document.getElementById("userTicketsListContainer").innerHTML = `<p class="text-red-400 text-xs">Error loading tickets: ${e.message}</p>`;
+  }
+}
+
+/* ================= ADMIN VIEW & 7-TAB DASHBOARD ================= */
+async function enterAdmin(){
+  state.adminActiveTab = "Overview";
+  renderAdmin("Overview");
+}
+
+async function renderAdmin(tab="Overview"){
+  state.adminActiveTab = tab;
+  const app = document.getElementById("app");
+  const tabs = [
+    "Overview",
+    "Seller Verification",
+    "All Users",
+    "All Orders",
+    "Support Desk",
+    "Admin Accounts",
+    "Platform Config"
+  ];
+
+  app.innerHTML = navBar(tabs, tab, (t)=>renderAdmin(t)) + `<div id="adminBody" class="max-w-7xl mx-auto px-4 pb-16"></div>`;
+  wireNav((t)=>renderAdmin(t));
+
+  if(tab === "Overview") await renderAdminOverview();
+  else if(tab === "Seller Verification") await renderAdminSellers();
+  else if(tab === "All Users") await renderAdminUsers();
+  else if(tab === "All Orders") await renderAdminOrders();
+  else if(tab === "Support Desk") await renderAdminSupport();
+  else if(tab === "Admin Accounts") await renderAdminAccounts();
+  else if(tab === "Platform Config") await renderAdminConfig();
+}
+
+/* ---------- ADMIN TAB 1: OVERVIEW ---------- */
+async function renderAdminOverview(){
+  const body = document.getElementById("adminBody");
+  if(!body) return;
+
+  try {
+    state.adminStats = await api("/api/admin/stats");
+  } catch(e){
+    body.innerHTML = `<p class="text-red-400 text-sm py-8 text-center">Failed to load admin metrics: ${e.message}</p>`;
+    return;
+  }
+
+  const s = state.adminStats || {};
+
+  body.innerHTML = `
+    <!-- Top Hero Banner -->
+    <div class="glass glow-border p-6 mb-6 fade-up flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-rose-400 animate-ping"></span>
+          <span class="text-xs uppercase font-extrabold tracking-widest text-rose-300">Supreme Governance Console</span>
+        </div>
+        <h2 class="text-2xl font-bold mt-1 text-white">OrderFlow AI Platform Dashboard</h2>
+        <p class="text-xs text-white/60 mt-0.5">Welcome, Administrator ${state.user.name} (#${state.user.id}) · Live multi-seller operations</p>
+      </div>
+
+      <div class="flex items-center gap-2 flex-wrap">
+        <button onclick="renderAdmin('Seller Verification')" class="btn-neon text-xs font-bold px-4 py-2 cursor-pointer flex items-center gap-1.5">
+          <span>🛡️ Pending Sellers (${s.pending_seller_verifications || 0})</span>
+        </button>
+        <button onclick="renderAdmin('Support Desk')" class="glass px-4 py-2 rounded-xl text-xs font-bold text-amber-300 border border-amber-400/40 cursor-pointer flex items-center gap-1.5 hover:bg-white/10">
+          <span>💬 Tickets (${s.open_support_tickets || 0})</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Alert Ribbons (If Action Required) -->
+    ${(s.pending_seller_verifications > 0 || s.pending_admin_approvals > 0) ? `
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 fade-up">
+        ${s.pending_seller_verifications > 0 ? `
+          <div class="glass p-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <span class="text-2xl">🏪</span>
+              <div>
+                <p class="text-xs font-bold text-amber-300">${s.pending_seller_verifications} Seller Application(s) Awaiting KYC</p>
+                <p class="text-[11px] text-white/60">Review warehouse, address, and product details</p>
+              </div>
+            </div>
+            <button onclick="renderAdmin('Seller Verification')" class="btn-warning text-xs font-bold px-3.5 py-1.5 cursor-pointer">Review →</button>
+          </div>
+        ` : ''}
+
+        ${s.pending_admin_approvals > 0 ? `
+          <div class="glass p-4 rounded-2xl border border-purple-500/40 bg-purple-500/10 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <span class="text-2xl">🔑</span>
+              <div>
+                <p class="text-xs font-bold text-purple-300">${s.pending_admin_approvals} New Admin ID Request(s)</p>
+                <p class="text-[11px] text-white/60">Approve or reject platform admin privileges</p>
+              </div>
+            </div>
+            <button onclick="renderAdmin('Admin Accounts')" class="btn-neon text-xs font-bold px-3.5 py-1.5 cursor-pointer">Authorize →</button>
+          </div>
+        ` : ''}
+      </div>
+    ` : ''}
+
+    <!-- 4 Major Stat Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="glass p-5 fade-up border-cyan-400/30">
+        <span class="text-xs text-white/50 uppercase tracking-wider font-semibold">Platform GMV</span>
+        <div class="text-2xl font-bold font-mono text-cyan-300 mt-2">₹${(s.total_revenue || 0).toLocaleString()}</div>
+        <p class="text-[11px] text-white/40 mt-1">Gross sales across all stores</p>
+      </div>
+
+      <div class="glass p-5 fade-up border-purple-400/30">
+        <span class="text-xs text-white/50 uppercase tracking-wider font-semibold">Total Orders</span>
+        <div class="text-2xl font-bold font-mono text-purple-300 mt-2">${s.total_orders || 0}</div>
+        <p class="text-[11px] text-white/40 mt-1">Cross-seller order volume</p>
+      </div>
+
+      <div class="glass p-5 fade-up border-emerald-400/30">
+        <span class="text-xs text-white/50 uppercase tracking-wider font-semibold">Verified Sellers</span>
+        <div class="text-2xl font-bold font-mono text-emerald-300 mt-2">${s.total_sellers || 0} Stores</div>
+        <p class="text-[11px] text-white/40 mt-1">${s.total_customers || 0} Registered customers</p>
+      </div>
+
+      <div class="glass p-5 fade-up border-rose-400/30">
+        <span class="text-xs text-white/50 uppercase tracking-wider font-semibold">Open Grievances</span>
+        <div class="text-2xl font-bold font-mono text-rose-300 mt-2">${s.open_support_tickets || 0} Tickets</div>
+        <p class="text-[11px] text-white/40 mt-1">Awaiting admin resolution</p>
+      </div>
+    </div>
+
+    <!-- Recent Platform Activity Table -->
+    <div class="glass p-6 fade-up">
+      <div class="flex justify-between items-center mb-4">
+        <div>
+          <h3 class="text-base font-bold text-white">Recent Global Platform Orders</h3>
+          <p class="text-xs text-white/40">Latest orders placed across all merchant storefronts</p>
+        </div>
+        <button onclick="renderAdmin('All Orders')" class="text-xs text-cyan-300 hover:underline cursor-pointer">View All Orders →</button>
+      </div>
+
+      <div class="overflow-x-auto scrollbar-thin">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-white/10 text-white/40 font-semibold uppercase text-[10px]">
+              <th class="py-2.5 px-3">Order ID</th>
+              <th class="py-2.5 px-3">Customer</th>
+              <th class="py-2.5 px-3">Seller Store</th>
+              <th class="py-2.5 px-3">Amount</th>
+              <th class="py-2.5 px-3">Payment</th>
+              <th class="py-2.5 px-3">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5">
+            ${(s.recent_orders || []).map(o => `
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-3 font-mono font-bold text-white">#${o.id}</td>
+                <td class="py-3 px-3 text-white/80">${o.customer_name}</td>
+                <td class="py-3 px-3 text-cyan-300 font-medium">🏪 ${o.seller_name}</td>
+                <td class="py-3 px-3 font-bold text-white">₹${(o.amount || 0).toLocaleString()}</td>
+                <td class="py-3 px-3">
+                  <span class="px-2 py-0.5 rounded text-[10px] bg-white/5 border border-white/10 text-white/70">${o.payment_method} · ${o.payment_status}</span>
+                </td>
+                <td class="py-3 px-3">${statusBadge(o.status)}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="6" class="text-center py-6 text-white/40">No orders recorded on the platform yet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+/* ---------- ADMIN TAB 2: SELLER VERIFICATION (KYC) ---------- */
+async function renderAdminSellers(){
+  const body = document.getElementById("adminBody");
+  if(!body) return;
+
+  try {
+    state.pendingSellers = await api("/api/admin/sellers/pending");
+  } catch(e){
+    body.innerHTML = `<p class="text-red-400 text-sm py-8 text-center">Failed to fetch pending sellers: ${e.message}</p>`;
+    return;
+  }
+
+  const list = state.pendingSellers || [];
+
+  body.innerHTML = `
+    <div class="glass glow-border p-6 mb-6 fade-up">
+      <div class="flex justify-between items-center mb-6">
+        <div>
+          <span class="text-[10px] uppercase font-bold tracking-wider text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">Compliance & Trust Desk</span>
+          <h2 class="text-2xl font-bold text-white mt-1">Seller KYC Verification Queue</h2>
+          <p class="text-xs text-white/50">Verify identity, business address, and shipping models before approving seller listing privileges</p>
+        </div>
+        <span class="text-xs px-3 py-1.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-bold">
+          ${list.length} Application(s) Pending
+        </span>
+      </div>
+
+      ${list.length === 0 ? `
+        <div class="glass p-12 text-center rounded-2xl border border-white/5">
+          <span class="text-4xl block mb-3">🎉</span>
+          <h3 class="text-lg font-bold text-white">All Caught Up!</h3>
+          <p class="text-xs text-white/50 max-w-md mx-auto mt-1">There are no pending seller applications awaiting review right now. All active merchants are verified.</p>
+        </div>
+      ` : `
+        <div class="space-y-4">
+          ${list.map(s => `
+            <div class="glass p-5 rounded-2xl border border-amber-500/30 hover:border-cyan-400/50 transition-all fade-up">
+              <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-white/10 pb-4 mb-4">
+                <div class="flex items-center gap-3">
+                  <div class="w-12 h-12 rounded-xl bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-2xl flex-shrink-0">
+                    🏪
+                  </div>
+                  <div>
+                    <h3 class="text-base font-bold text-white flex items-center gap-2">
+                      <span>${s.brand_name || s.name}</span>
+                      <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">ID: #${s.id}</span>
+                    </h3>
+                    <p class="text-xs text-white/60">Owner: <strong class="text-white">${s.name}</strong> · Registered State: <strong class="text-cyan-300">${s.state || 'N/A'}</strong></p>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <button onclick="adminApproveSeller('${s.id}')" class="btn-neon text-xs font-bold px-4 py-2 cursor-pointer flex items-center gap-1.5">
+                    <span>✓ Approve & Activate</span>
+                  </button>
+                  <button onclick="adminOpenRejectSellerModal('${s.id}', '${s.name}')" class="btn-danger text-xs font-bold px-3 py-2 cursor-pointer">
+                    <span>✕ Reject</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- KYC Details Grid -->
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                <div class="p-3 rounded-xl bg-white/5 border border-white/5">
+                  <span class="text-[10px] text-white/40 uppercase font-bold tracking-wider block mb-1">Contact & Category</span>
+                  <p class="text-white/80">📱 Phone: <span class="font-mono text-cyan-300">${s.phone || 'N/A'}</span></p>
+                  <p class="text-white/80">✉️ Email: <span class="text-white/60">${s.email}</span></p>
+                  <p class="text-white/80">🏷️ Category: <span class="text-purple-300">${s.product_category || 'General'}</span></p>
+                </div>
+
+                <div class="p-3 rounded-xl bg-white/5 border border-white/5">
+                  <span class="text-[10px] text-white/40 uppercase font-bold tracking-wider block mb-1">Logistics & Operations</span>
+                  <p class="text-white/80">🚚 Shipping: <span class="capitalize font-bold text-white">${s.shipping_mode === 'self_ship' ? 'Self Ship' : 'Marketplace Fulfillment'}</span></p>
+                  <p class="text-white/80">⚡ Acceptance: <span class="capitalize text-white">${s.order_acceptance || 'auto'}</span></p>
+                  <p class="text-white/80">🔄 RTO Mode: <span class="capitalize text-white">${s.rto_mode || 'seller_return'}</span></p>
+                </div>
+
+                <div class="p-3 rounded-xl bg-white/5 border border-white/5">
+                  <span class="text-[10px] text-white/40 uppercase font-bold tracking-wider block mb-1">Stock / Warehouse Address</span>
+                  <p class="text-white/70 leading-relaxed font-mono text-[11px]">${s.stock_address || 'No stock address specified'}</p>
+                </div>
+              </div>
+
+              ${s.brand_description ? `
+                <div class="mt-3 pt-2 text-[11px] text-white/50 border-t border-white/5">
+                  <strong>Brand Description:</strong> ${s.brand_description}
+                </div>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>`;
+}
+
+async function adminApproveSeller(sellerId){
+  try {
+    const res = await api(`/api/admin/sellers/${sellerId}/approve`, { method: "POST" });
+    confettiBurst();
+    toast(`Seller #${sellerId} has been successfully approved!`, "success");
+    await renderAdminSellers();
+  } catch(e){
+    toast("Approval error: " + e.message, "error");
+  }
+}
+
+function adminOpenRejectSellerModal(sellerId, sellerName){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 sm:p-7 w-full max-w-md pop-in bg-[#070b22]/98 border-red-500/40 relative z-50">
+        <h3 class="text-base font-bold text-white mb-2 flex items-center gap-2">
+          <span>✕ Reject Application #${sellerId} (${sellerName})</span>
+        </h3>
+        <p class="text-xs text-white/60 mb-4 leading-relaxed">
+          Provide a clear rejection reason. This reason will be emailed to the seller applicant so they can fix their details.
+        </p>
+
+        <form id="adminRejectForm" class="space-y-4">
+          <div>
+            <label class="block text-xs font-semibold text-white/80 mb-1">Rejection Reason *</label>
+            <textarea id="adminRejectReason" required rows="3" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-400">Warehouse address incomplete or unserviceable by our logistics partners.</textarea>
+          </div>
+
+          <div class="flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="btn-danger text-xs font-bold px-5 py-2.5 cursor-pointer">Confirm Rejection</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("adminRejectForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const reason = document.getElementById("adminRejectReason").value.trim();
+    try {
+      await api(`/api/admin/sellers/${sellerId}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason })
+      });
+      closeModal();
+      toast(`Seller #${sellerId} application rejected.`, "info");
+      await renderAdminSellers();
+    } catch(err){ toast("Rejection failed: " + err.message, "error"); }
+  };
+}
+
+/* ---------- ADMIN TAB 3: ALL USERS ---------- */
+async function renderAdminUsers(){
+  const body = document.getElementById("adminBody");
+  if(!body) return;
+
+  body.innerHTML = `
+    <div class="glass glow-border p-6 mb-6 fade-up">
+      <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
+        <div>
+          <span class="text-[10px] uppercase font-bold tracking-wider text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">Directory Management</span>
+          <h2 class="text-2xl font-bold text-white mt-1">All Platform Users</h2>
+          <p class="text-xs text-white/50">Manage customer accounts, verified merchants, and platform administrators</p>
+        </div>
+
+        <!-- Filter Controls -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <input type="text" id="adminUserSearch" placeholder="Search name, ID, email..." class="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400 w-44" />
+          <select id="adminUserRoleFilter" class="bg-[#0a0f2b] border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400">
+            <option value="">All Roles</option>
+            <option value="customer">Customers</option>
+            <option value="seller">Sellers</option>
+            <option value="admin">Admins</option>
+          </select>
+          <select id="adminUserStatusFilter" class="bg-[#0a0f2b] border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-400">
+            <option value="">All Statuses</option>
+            <option value="active">Active</option>
+            <option value="pending_verification">Pending KYC</option>
+            <option value="pending_admin_approval">Pending Admin</option>
+            <option value="suspended">Suspended</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="adminUsersTableContainer" class="overflow-x-auto scrollbar-thin">
+        <p class="text-xs text-white/40 text-center py-6">Loading directory...</p>
+      </div>
+    </div>`;
+
+  async function loadUsers(){
+    const search = document.getElementById("adminUserSearch")?.value || "";
+    const role = document.getElementById("adminUserRoleFilter")?.value || "";
+    const status = document.getElementById("adminUserStatusFilter")?.value || "";
+
+    const params = new URLSearchParams();
+    if(search) params.set("search", search);
+    if(role) params.set("role", role);
+    if(status) params.set("status", status);
+
+    try {
+      const users = await api(`/api/admin/users?${params.toString()}`);
+      const container = document.getElementById("adminUsersTableContainer");
+      if(!container) return;
+
+      container.innerHTML = `
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-white/10 text-white/40 font-semibold uppercase text-[10px]">
+              <th class="py-2.5 px-3">User / Merchant</th>
+              <th class="py-2.5 px-3">Role</th>
+              <th class="py-2.5 px-3">Contact</th>
+              <th class="py-2.5 px-3">Status</th>
+              <th class="py-2.5 px-3">Registered</th>
+              <th class="py-2.5 px-3 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5">
+            ${users.map(u => {
+              const isFounder = u.is_first_admin === 1 || u.is_first_admin === true;
+              return `
+                <tr class="hover:bg-white/5 transition-colors">
+                  <td class="py-3 px-3">
+                    <div class="flex items-center gap-2.5">
+                      <img src="${u.picture || 'https://api.dicebear.com/7.x/identicon/svg?seed=' + u.name}" class="w-7 h-7 rounded-full border border-white/10" />
+                      <div>
+                        <p class="font-bold text-white">${u.brand_name || u.name}</p>
+                        <p class="text-[10px] text-white/40 font-mono">ID: #${u.id}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="py-3 px-3">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${u.role==='seller'?'bg-purple-500/20 text-purple-300':(u.role==='admin'?'bg-rose-500/20 text-rose-300':'bg-cyan-500/20 text-cyan-300')}">
+                      ${u.role}
+                    </span>
+                  </td>
+                  <td class="py-3 px-3 text-white/60">
+                    <p class="text-[11px]">${u.email}</p>
+                    ${u.phone ? `<p class="text-[10px] font-mono text-cyan-300">${u.phone}</p>` : ''}
+                  </td>
+                  <td class="py-3 px-3">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-semibold ${u.status==='active'?'bg-emerald-500/20 text-emerald-300':(u.status==='suspended'?'bg-red-500/20 text-red-300':'bg-amber-500/20 text-amber-300')}">
+                      ${u.status}
+                    </span>
+                  </td>
+                  <td class="py-3 px-3 text-white/40 font-mono text-[10px]">
+                    ${(u.created_at || '').slice(0, 10)}
+                  </td>
+                  <td class="py-3 px-3 text-right">
+                    ${isFounder ? `
+                      <span class="text-[10px] text-amber-400 font-bold px-2 py-1 bg-amber-500/10 rounded-lg border border-amber-500/20">👑 Founder Admin</span>
+                    ` : (
+                      u.status === 'active' ? `
+                        <button onclick="adminToggleUserStatus('${u.id}', 'suspended')" class="px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 text-[10px] font-bold cursor-pointer">
+                          Suspend
+                        </button>
+                      ` : `
+                        <button onclick="adminToggleUserStatus('${u.id}', 'active')" class="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold cursor-pointer">
+                          Reactivate
+                        </button>
+                      `
+                    )}
+                  </td>
+                </tr>`;
+            }).join('') || '<tr><td colspan="6" class="text-center py-6 text-white/40">No users match filters.</td></tr>'}
+          </tbody>
+        </table>`;
+    } catch(err){
+      toast("Error filtering users: " + err.message, "error");
+    }
+  }
+
+  document.getElementById("adminUserSearch").oninput = debounce(loadUsers, 300);
+  document.getElementById("adminUserRoleFilter").onchange = loadUsers;
+  document.getElementById("adminUserStatusFilter").onchange = loadUsers;
+  loadUsers();
+}
+
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+async function adminToggleUserStatus(userId, newStatus){
+  try {
+    await api(`/api/admin/users/${userId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: newStatus, reason: "Administrative governance policy" })
+    });
+    toast(`User #${userId} status set to ${newStatus}`, "info");
+    await renderAdminUsers();
+  } catch(e){
+    toast("Action failed: " + e.message, "error");
+  }
+}
+
+/* ---------- ADMIN TAB 4: ALL ORDERS ---------- */
+async function renderAdminOrders(){
+  const body = document.getElementById("adminBody");
+  if(!body) return;
+
+  try {
+    state.adminOrders = await api("/api/orders");
+  } catch(e){
+    body.innerHTML = `<p class="text-red-400 text-sm py-8 text-center">Failed to fetch platform orders: ${e.message}</p>`;
+    return;
+  }
+
+  const orders = state.adminOrders || [];
+
+  body.innerHTML = `
+    <div class="glass glow-border p-6 mb-6 fade-up">
+      <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-6">
+        <div>
+          <span class="text-[10px] uppercase font-bold tracking-wider text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">Global Order Ledger</span>
+          <h2 class="text-2xl font-bold text-white mt-1">Cross-Store Order Stream</h2>
+          <p class="text-xs text-white/50">Real-time supervision of all transactions and shipments</p>
+        </div>
+        <span class="text-xs px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-cyan-300 font-mono">
+          Total Orders: ${orders.length}
+        </span>
+      </div>
+
+      <div class="space-y-3.5">
+        ${orders.map(o => `
+          <div class="glass p-4 rounded-2xl border border-white/10 hover:border-cyan-400/40 transition-all fade-up">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-white/5 pb-2.5 mb-2.5">
+              <div class="flex items-center gap-2">
+                <span class="font-mono font-bold text-white text-sm">#${o.id}</span>
+                <span class="text-xs text-cyan-300">🏪 ${o.seller_name}</span>
+                <span class="text-xs text-white/40">→ Customer: ${o.customer_name}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="font-mono font-bold text-cyan-300 text-sm">₹${(o.amount || 0).toLocaleString()}</span>
+                ${statusBadge(o.status)}
+              </div>
+            </div>
+
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 text-xs">
+              <div class="text-white/70">
+                <p>Items: <strong class="text-white">${(o.items || []).map(i=>i.name+' ×'+i.qty).join(', ')}</strong></p>
+                <p class="text-[11px] text-white/40 mt-0.5">Payment: ${o.payment_method} (${o.payment_status}) · ETA: ${o.eta || 'N/A'}</p>
+              </div>
+
+              <!-- Admin Status Override Action -->
+              <div class="flex items-center gap-2">
+                <label class="text-[11px] text-white/50">Status Override:</label>
+                <select onchange="adminUpdateOrderStatus('${o.id}', this.value)" class="bg-[#0a0f2b] border border-white/10 rounded-xl px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-400">
+                  <option value="Placed" ${o.status==='Placed'?'selected':''}>Placed</option>
+                  <option value="Processing" ${o.status==='Processing'?'selected':''}>Processing</option>
+                  <option value="Delayed" ${o.status==='Delayed'?'selected':''}>Delayed</option>
+                  <option value="Completed" ${o.status==='Completed'?'selected':''}>Completed</option>
+                  <option value="Cancelled" ${o.status==='Cancelled'?'selected':''}>Cancelled</option>
+                </select>
+
+                <button onclick="downloadOrderInvoice('${o.id}')" class="px-3 py-1 rounded-xl bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 text-xs font-semibold cursor-pointer">
+                  📄 PDF Invoice
+                </button>
+              </div>
+            </div>
+          </div>
+        `).join('') || '<p class="text-white/40 text-xs py-8 text-center">No orders have been recorded on the platform.</p>'}
+      </div>
+    </div>`;
+}
+
+async function adminUpdateOrderStatus(orderId, newStatus){
+  try {
+    const updated = await api(`/api/orders/${orderId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: newStatus })
+    });
+    toast(`Order #${orderId} status overridden to ${newStatus}`, "success");
+    await renderAdminOrders();
+  } catch(e){
+    toast("Status update failed: " + e.message, "error");
+  }
+}
+
+/* ---------- ADMIN TAB 5: SUPPORT DESK & LIVE CHAT ---------- */
+async function renderAdminSupport(){
+  const body = document.getElementById("adminBody");
+  if(!body) return;
+
+  try {
+    state.adminTickets = await api("/api/support/tickets");
+  } catch(e){
+    body.innerHTML = `<p class="text-red-400 text-sm py-8 text-center">Failed to load support tickets: ${e.message}</p>`;
+    return;
+  }
+
+  const tickets = state.adminTickets || [];
+  const selectedTicket = tickets.find(t => t.id === state.activeTicketId) || tickets[0] || null;
+  if(selectedTicket && !state.activeTicketId){
+    state.activeTicketId = selectedTicket.id;
+  }
+
+  body.innerHTML = `
+    <div class="glass glow-border p-6 mb-6 fade-up">
+      <div class="flex justify-between items-center mb-6">
+        <div>
+          <span class="text-[10px] uppercase font-bold tracking-wider text-rose-300 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">Customer Satisfaction Hub</span>
+          <h2 class="text-2xl font-bold text-white mt-1">Grievances & Live Support Desk</h2>
+          <p class="text-xs text-white/50">Address complaints, resolve disputes, and reply directly to buyers and sellers in real-time</p>
+        </div>
+        <span class="text-xs px-3 py-1.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/30 font-bold">
+          ${tickets.filter(t=>t.status!=='resolved').length} Open Ticket(s)
+        </span>
+      </div>
+
+      ${tickets.length === 0 ? `
+        <div class="glass p-12 text-center rounded-2xl border border-white/5">
+          <span class="text-4xl block mb-3">✨</span>
+          <h3 class="text-lg font-bold text-white">No Support Tickets Raised</h3>
+          <p class="text-xs text-white/50 max-w-md mx-auto mt-1">All customers and sellers are satisfied! When a user raises a complaint, it will appear here immediately with WebSocket chime alerts.</p>
+        </div>
+      ` : `
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <!-- Left Ticket List (1 Column) -->
+          <div class="lg:col-span-1 space-y-2.5 max-h-[70vh] overflow-y-auto scrollbar-thin pr-1">
+            ${tickets.map(t => {
+              const isSelected = t.id === state.activeTicketId;
+              return `
+                <div onclick="selectAdminTicket('${t.id}')" class="glass p-3.5 rounded-xl border ${isSelected ? 'border-cyan-400 bg-cyan-500/10 shadow-lg shadow-cyan-500/20' : 'border-white/10 hover:border-white/30'} cursor-pointer transition-all">
+                  <div class="flex justify-between items-center mb-1">
+                    <span class="font-bold text-white text-xs">#${t.id} · ${t.category}</span>
+                    <span class="text-[9px] px-2 py-0.5 rounded-full uppercase font-bold ${t.status==='resolved'?'bg-emerald-500/20 text-emerald-300':'bg-rose-500/20 text-rose-300'}">${t.status}</span>
+                  </div>
+                  <p class="text-[11px] text-white/60 line-clamp-2">${t.description}</p>
+                  <div class="flex justify-between items-center mt-2 text-[10px] text-white/40">
+                    <span>${t.user_name} (${t.user_role})</span>
+                    <span class="text-amber-400 font-bold">${'★'.repeat(t.rating || 1)}</span>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+
+          <!-- Right Active Ticket & Live Chat (2 Columns) -->
+          <div class="lg:col-span-2 glass p-5 rounded-2xl border border-white/10 flex flex-col justify-between min-h-[500px]" id="adminActiveTicketPane">
+            <div id="adminTicketDetailsContainer">
+              <span class="animate-pulse text-xs text-white/40">Loading conversation...</span>
+            </div>
+          </div>
+        </div>
+      `}
+    </div>`;
+
+  if(selectedTicket){
+    await loadAdminTicketMessages(selectedTicket.id);
+  }
+}
+
+async function selectAdminTicket(ticketId){
+  state.activeTicketId = ticketId;
+  const cards = document.querySelectorAll("#adminBody .glass");
+  await loadAdminTicketMessages(ticketId);
+}
+
+async function loadAdminTicketMessages(ticketId){
+  state.activeTicketId = ticketId;
+  try {
+    state.activeTicketMessages = await api(`/api/support/tickets/${ticketId}/messages`);
+  } catch(e){
+    state.activeTicketMessages = [];
+  }
+  renderAdminTicketMessages();
+}
+
+function renderAdminTicketMessages(){
+  const container = document.getElementById("adminActiveTicketPane");
+  if(!container || !state.activeTicketId) return;
+
+  const t = (state.adminTickets || []).find(x => x.id === state.activeTicketId);
+  if(!t) return;
+
+  container.innerHTML = `
+    <!-- Ticket Top Info -->
+    <div class="border-b border-white/10 pb-4 mb-3">
+      <div class="flex justify-between items-start">
+        <div>
+          <div class="flex items-center gap-2">
+            <h3 class="text-base font-bold text-white">Ticket #${t.id} · ${t.category}</h3>
+            <span class="text-[10px] px-2.5 py-0.5 rounded-full uppercase font-bold ${t.status==='resolved'?'bg-emerald-500/20 text-emerald-300':'bg-rose-500/20 text-rose-300'}">${t.status}</span>
+          </div>
+          <p class="text-xs text-white/60 mt-0.5">Raised by: <strong class="text-white">${t.user_name}</strong> (${t.user_role} #${t.user_id}) · User Satisfaction: <span class="text-amber-400 font-bold">${'★'.repeat(t.rating || 1)}</span></p>
+        </div>
+
+        ${t.status !== 'resolved' ? `
+          <button onclick="adminResolveTicket('${t.id}')" class="btn-neon text-xs font-bold px-3.5 py-1.5 cursor-pointer flex items-center gap-1">
+            <span>✓ Mark as Resolved</span>
+          </button>
+        ` : `
+          <span class="text-xs text-emerald-400 font-bold px-3 py-1 bg-emerald-500/10 rounded-lg border border-emerald-500/20">Resolved ✓</span>
+        `}
+      </div>
+
+      <!-- Grievance Description -->
+      <div class="glass p-3 rounded-xl bg-white/5 mt-3 text-xs text-white/80 leading-relaxed border border-white/5">
+        <strong class="text-white/40 uppercase text-[10px] block mb-1">Original Grievance:</strong>
+        ${t.description}
+      </div>
+    </div>
+
+    <!-- Live Chat Messages Thread -->
+    <div id="adminLiveChatThread" class="flex-1 overflow-y-auto space-y-2.5 py-2 my-2 scrollbar-thin max-h-[300px]">
+      ${state.activeTicketMessages.length === 0 ? `
+        <p class="text-xs text-white/40 text-center py-6">No chat messages yet. Type a response below to assist this user.</p>
+      ` : state.activeTicketMessages.map(m => {
+        const isAdmin = m.sender_role === "admin";
+        return `
+          <div class="flex flex-col ${isAdmin ? 'items-end' : 'items-start'}">
+            <div class="text-[9px] text-white/40 mb-0.5 px-1">${m.sender_name} (${m.sender_role})</div>
+            <div class="max-w-[85%] px-3.5 py-2 rounded-2xl text-xs ${isAdmin ? 'bg-cyan-500/20 text-cyan-200 rounded-tr-none border border-cyan-400/40' : 'bg-purple-500/20 text-white rounded-tl-none border border-purple-400/40'}">
+              ${m.message}
+            </div>
+            <div class="text-[9px] text-white/30 font-mono mt-0.5 px-1">${(m.timestamp || '').slice(11, 16)}</div>
+          </div>`;
+      }).join('')}
+    </div>
+
+    <!-- Admin Reply Input -->
+    <form id="adminReplyForm" class="pt-3 border-t border-white/10 flex gap-2">
+      <input id="adminReplyInput" required type="text" placeholder="Type direct reply to ${t.user_name}..." class="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+      <button type="submit" class="btn-neon text-xs font-bold px-5 py-2.5 cursor-pointer">
+        Send Reply →
+      </button>
+    </form>`;
+
+  const thread = document.getElementById("adminLiveChatThread");
+  if(thread) thread.scrollTop = thread.scrollHeight;
+
+  document.getElementById("adminReplyForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const input = document.getElementById("adminReplyInput");
+    const text = input.value.trim();
+    if(!text) return;
+    input.value = "";
+
+    try {
+      const newMsg = await api(`/api/support/tickets/${t.id}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ message: text })
+      });
+      state.activeTicketMessages.push(newMsg);
+      renderAdminTicketMessages();
+      toast("Reply delivered to user", "success");
+    } catch(err){
+      toast("Failed to send message: " + err.message, "error");
+    }
+  };
+}
+
+async function adminResolveTicket(ticketId){
+  try {
+    await api(`/api/support/tickets/${ticketId}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ reply: "Issue resolved by administrator.", resolve: true })
+    });
+    toast(`Ticket #${ticketId} marked as resolved!`, "success");
+    await renderAdminSupport();
+  } catch(e){
+    toast("Error resolving ticket: " + e.message, "error");
+  }
+}
+
+/* ---------- ADMIN TAB 6: ADMIN ACCOUNTS & APPROVALS ---------- */
+async function renderAdminAccounts(){
+  const body = document.getElementById("adminBody");
+  if(!body) return;
+
+  try {
+    state.pendingAdmins = await api("/api/admin/admins/pending");
+  } catch(e){
+    state.pendingAdmins = [];
+  }
+
+  let allUsers = [];
+  try {
+    allUsers = await api("/api/admin/users?role=admin");
+  } catch(e){}
+
+  const pending = state.pendingAdmins || [];
+
+  body.innerHTML = `
+    <div class="glass glow-border p-6 mb-6 fade-up">
+      <div class="flex justify-between items-center mb-6">
+        <div>
+          <span class="text-[10px] uppercase font-bold tracking-wider text-rose-300 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">Role-Based Access Control</span>
+          <h2 class="text-2xl font-bold text-white mt-1">Admin Approvals & Accounts</h2>
+          <p class="text-xs text-white/50">Authorize new platform administrators or revoke privileges</p>
+        </div>
+        <span class="text-xs px-3 py-1.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/30 font-bold">
+          ${pending.length} Pending Approval(s)
+        </span>
+      </div>
+
+      <!-- Pending Applications Section -->
+      <div class="mb-8">
+        <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
+          <span>⏳ Pending Admin Access Applications</span>
+        </h3>
+
+        ${pending.length === 0 ? `
+          <div class="glass p-6 text-center rounded-xl border border-white/5">
+            <p class="text-xs text-white/50">No pending admin applications awaiting approval.</p>
+          </div>
+        ` : `
+          <div class="space-y-3">
+            ${pending.map(a => `
+              <div class="glass p-4 rounded-xl border border-purple-500/40 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 fade-up">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-white text-sm">${a.name}</span>
+                    <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/20 text-purple-300">ID: #${a.id}</span>
+                  </div>
+                  <p class="text-xs text-white/60">Email: <strong class="text-white">${a.email}</strong></p>
+                  ${a.brand_description ? `<p class="text-[11px] text-white/40 mt-1">Reason: "${a.brand_description}"</p>` : ''}
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <button onclick="adminApproveAdmin('${a.id}')" class="btn-neon text-xs font-bold px-4 py-2 cursor-pointer flex items-center gap-1">
+                    <span>✓ Authorize Admin</span>
+                  </button>
+                  <button onclick="adminRejectAdmin('${a.id}')" class="btn-danger text-xs font-bold px-3 py-2 cursor-pointer">
+                    <span>✕ Reject</span>
+                  </button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `}
+      </div>
+
+      <!-- Active Platform Administrators List -->
+      <div>
+        <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-2">
+          <span>🛡️ Active Platform Administrators (${allUsers.filter(u=>u.status==='active').length})</span>
+        </h3>
+
+        <div class="space-y-2.5">
+          ${allUsers.map(a => {
+            const isFounder = a.is_first_admin === 1 || a.is_first_admin === true;
+            return `
+              <div class="glass p-3.5 rounded-xl border border-white/10 flex justify-between items-center text-xs">
+                <div class="flex items-center gap-3">
+                  <img src="${a.picture || 'https://api.dicebear.com/7.x/identicon/svg?seed=' + a.name}" class="w-8 h-8 rounded-full border border-white/20" />
+                  <div>
+                    <p class="font-bold text-white flex items-center gap-2">
+                      <span>${a.name}</span>
+                      <span class="font-mono text-cyan-300 text-[10px]">#${a.id}</span>
+                    </p>
+                    <p class="text-[10px] text-white/40">${a.email}</p>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  ${isFounder ? `
+                    <span class="text-[10px] font-bold text-amber-300 px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/30">👑 Founder (Supreme Authority)</span>
+                  ` : `
+                    <span class="text-[10px] font-semibold text-emerald-300 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">Verified Admin</span>
+                  `}
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+async function adminApproveAdmin(adminId){
+  try {
+    await api(`/api/admin/admins/${adminId}/approve`, { method: "POST" });
+    confettiBurst();
+    toast(`Admin ID #${adminId} has been authorized!`, "success");
+    await renderAdminAccounts();
+  } catch(e){
+    toast("Approval error: " + e.message, "error");
+  }
+}
+
+async function adminRejectAdmin(adminId){
+  if(!confirm("Are you sure you want to reject this admin request?")) return;
+  try {
+    await api(`/api/admin/admins/${adminId}/reject`, { method: "POST" });
+    toast(`Admin ID #${adminId} was rejected.`, "info");
+    await renderAdminAccounts();
+  } catch(e){
+    toast("Rejection error: " + e.message, "error");
+  }
+}
+
+/* ---------- ADMIN TAB 7: PLATFORM CONFIG & COUPONS ---------- */
+async function renderAdminConfig(){
+  const body = document.getElementById("adminBody");
+  if(!body) return;
+
+  let config = {};
+  try {
+    config = await api("/api/admin/platform-config");
+  } catch(e){}
+
+  let coupons = [];
+  try {
+    coupons = await api("/api/coupons");
+  } catch(e){}
+
+  body.innerHTML = `
+    <div class="glass glow-border p-6 mb-6 fade-up">
+      <div class="flex justify-between items-center mb-6">
+        <div>
+          <span class="text-[10px] uppercase font-bold tracking-wider text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">Infrastructure & Marketing</span>
+          <h2 class="text-2xl font-bold text-white mt-1">Platform Configurations & Promo Engine</h2>
+          <p class="text-xs text-white/50">System architecture health, integrations, and marketplace discount coupons</p>
+        </div>
+      </div>
+
+      <!-- System Integration Health Badges -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div class="glass p-4 rounded-xl border border-white/10">
+          <span class="text-[10px] uppercase font-bold text-white/40 block mb-1">Gemini AI Engine</span>
+          <p class="text-sm font-bold text-white flex items-center gap-1.5">
+            ${config.gemini_enabled ? '<span class="text-emerald-400">● Active</span>' : '<span class="text-amber-400">○ Mock / Fallback</span>'}
+          </p>
+          <p class="text-[10px] text-white/40 mt-1">${config.gemini_enabled ? 'Gemini 2.0 Flash enabled' : 'Set GEMINI_API_KEY env var'}</p>
+        </div>
+
+        <div class="glass p-4 rounded-xl border border-white/10">
+          <span class="text-[10px] uppercase font-bold text-white/40 block mb-1">Razorpay Payments</span>
+          <p class="text-sm font-bold text-white flex items-center gap-1.5">
+            ${config.razorpay_enabled ? '<span class="text-emerald-400">● Live Keys</span>' : '<span class="text-amber-400">○ Test / Dev Mode</span>'}
+          </p>
+          <p class="text-[10px] text-white/40 mt-1">${config.razorpay_enabled ? 'HMAC-SHA256 signature verified' : 'Set RAZORPAY_KEY_ID env var'}</p>
+        </div>
+
+        <div class="glass p-4 rounded-xl border border-white/10">
+          <span class="text-[10px] uppercase font-bold text-white/40 block mb-1">Email Delivery (Resend)</span>
+          <p class="text-sm font-bold text-white flex items-center gap-1.5">
+            ${config.email_enabled ? '<span class="text-emerald-400">● Active</span>' : '<span class="text-amber-400">○ Mock Mode</span>'}
+          </p>
+          <p class="text-[10px] text-white/40 mt-1">${config.email_enabled ? 'Transactional KYC emails sending' : 'Set RESEND_API_KEY env var'}</p>
+        </div>
+
+        <div class="glass p-4 rounded-xl border border-white/10">
+          <span class="text-[10px] uppercase font-bold text-white/40 block mb-1">Database Engine</span>
+          <p class="text-sm font-bold text-white capitalize flex items-center gap-1.5">
+            <span class="text-cyan-400">● ${config.database || 'SQLite'}</span>
+          </p>
+          <p class="text-[10px] text-white/40 mt-1">Dual SQLite / PostgreSQL ready</p>
+        </div>
+      </div>
+
+      <!-- Marketplace Global Coupons -->
+      <div>
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-sm font-bold text-white uppercase tracking-wider">
+            🏷️ Global Marketplace Coupons (${coupons.length})
+          </h3>
+          <button onclick="openAdminCreateCouponModal()" class="btn-neon text-xs font-bold px-3.5 py-1.5 cursor-pointer">
+            ➕ Create Promo Code
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          ${coupons.map(c => `
+            <div class="glass p-3.5 rounded-xl border border-white/10 flex flex-col justify-between text-xs">
+              <div class="flex justify-between items-start mb-2">
+                <span class="font-mono font-bold text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">${c.code}</span>
+                <button onclick="adminDeleteCoupon('${c.id}')" class="text-red-400 hover:text-red-300 text-xs cursor-pointer">✕</button>
+              </div>
+              <p class="text-sm font-bold text-white">
+                ${c.discount_type === 'percent' ? `${c.discount_value}% OFF` : `₹${c.discount_value} FLAT`}
+              </p>
+              <p class="text-[10px] text-white/40 mt-1">Min Order: ₹${c.min_order} · Store: ${c.seller_id === 'all' ? 'All Stores' : '#' + c.seller_id}</p>
+            </div>
+          `).join('') || '<p class="text-xs text-white/40 py-4">No active coupons found.</p>'}
+        </div>
+      </div>
+    </div>`;
+}
+
+function openAdminCreateCouponModal(){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 w-full max-w-md pop-in bg-[#070b22]/98 relative z-50">
+        <h3 class="text-base font-bold text-white mb-1">Create Platform Coupon</h3>
+        <p class="text-xs text-white/50 mb-4">Applicable across all seller stores</p>
+
+        <form id="adminCouponForm" class="space-y-3.5 text-xs">
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Promo Code *</label>
+            <input id="adCoupCode" required type="text" placeholder="e.g. FESTIVE20" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono uppercase text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-semibold text-white/80 mb-1">Discount Type</label>
+              <select id="adCoupType" class="w-full bg-[#0a0f2b] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400">
+                <option value="percent">Percentage (%)</option>
+                <option value="flat">Flat Amount (₹)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-semibold text-white/80 mb-1">Discount Value *</label>
+              <input id="adCoupVal" required type="number" step="any" placeholder="15" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400 font-mono" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Minimum Order Amount (₹)</label>
+            <input id="adCoupMin" type="number" step="any" value="300" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400 font-mono" />
+          </div>
+
+          <div class="pt-2 flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="btn-neon text-xs font-bold px-5 py-2 cursor-pointer">Create Coupon</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("adminCouponForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const code = document.getElementById("adCoupCode").value.trim().toUpperCase();
+    const discount_type = document.getElementById("adCoupType").value;
+    const discount_value = parseFloat(document.getElementById("adCoupVal").value);
+    const min_order = parseFloat(document.getElementById("adCoupMin").value) || 0;
+
+    try {
+      await api("/api/coupons", {
+        method: "POST",
+        body: JSON.stringify({ code, discount_type, discount_value, min_order })
+      });
+      closeModal();
+      toast(`Coupon ${code} created successfully!`, "success");
+      await renderAdminConfig();
+    } catch(err){
+      toast("Error creating coupon: " + err.message, "error");
+    }
+  };
+}
+
+async function adminDeleteCoupon(couponId){
+  if(!confirm("Delete this coupon code?")) return;
+  try {
+    await api(`/api/coupons/${couponId}`, { method: "DELETE" });
+    toast("Coupon removed", "info");
+    await renderAdminConfig();
+  } catch(e){
+    toast("Delete failed: " + e.message, "error");
+  }
+}
+
 function closeModal(){
-  document.getElementById("modal-root").innerHTML = "";
+  const modal = document.getElementById("modal-root");
+  if(modal) modal.innerHTML = "";
 }
 
 /* ================= BOOTSTRAP ================= */

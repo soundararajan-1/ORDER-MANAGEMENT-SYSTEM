@@ -2,5 +2,18 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pydantic>=2.9.0
 pyjwt>=2.9.0
-requests>=2.28.0
+passlib[bcrypt]>=1.7.4
 websockets>=13.0
+requests>=2.28.0
+# PostgreSQL (optional — falls back to SQLite if DATABASE_URL not set)
+psycopg2-binary>=2.9.0
+# PDF invoice generation
+reportlab>=4.0.0
+# Gemini AI (optional — set GEMINI_API_KEY)
+google-genai>=1.0.0
+# Razorpay payments (optional — set RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET)
+razorpay>=1.4.0
+# Email notifications (optional — set RESEND_API_KEY)
+resend>=2.0.0
+# File uploads
+python-multipart>=0.0.9

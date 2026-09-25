@@ -16,3 +16,15 @@ sys.modules["orderflow_backend_main"] = backend_module
 spec.loader.exec_module(backend_module)
 
 app = backend_module.app
+
+if __name__ == "__main__":
+    import uvicorn
+    import sys
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    print("[SERVER] Starting OrderFlow-AI on http://127.0.0.1:8000 ...")
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)
+

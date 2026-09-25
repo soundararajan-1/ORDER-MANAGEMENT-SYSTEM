@@ -1,46 +1,64 @@
-# OrderFlow AI — Real-Time Multi-Seller Operations & Marketplace
+# OrderFlow AI v2.0 — Real-Time Multi-Seller Operations, Admin Governance & Marketplace
 
-> **A Flipkart-Grade Real-Time Order Management System** featuring **VisionOS Neon-Glassmorphism UI**, native **7-Digit ID + Password Authentication**, **Multi-Seller Order Routing & Isolation**, **Real-Time Stock Auto-Decrement**, **Order Delay ETA Sync**, and **Monthly Revenue Analytics**.
-
----
-
-## 🌟 Key Features
-
-### 1. 🔑 Native 7-Digit ID Authentication
-- **Seller IDs**: 7-digit numeric IDs starting with `1` (e.g., `1001001`, `1002002`, `1003003`).
-- **Customer IDs**: 7-digit numeric IDs starting with `7` (e.g., `7001001`, `7002002`).
-- **Auto-Generating Registration**: New sellers and customers can register; the system automatically generates a unique 7-digit ID.
-- **1-Click Test Profiles**: Pre-filled quick test accounts on the login screen for instant evaluation.
-
-### 2. 🏪 Multi-Seller Order Splitting & Isolation (Flipkart-Style)
-- **Store Attribution**: Every product card in the customer shop displays `🏪 Sold by: [Store Name] (ID: #[SellerID])`.
-- **Store Filter Chips**: Customers can browse by store or view the combined marketplace.
-- **Cart Splitting**: Adding items from multiple stores automatically splits them into individual sub-orders per seller upon checkout.
-- **Isolated Order Dispatch**: Each seller strictly sees and manages orders placed for their store. No cross-seller order leakage.
-- **New Seller Onboarding**: Newly registered sellers with 0 products see a welcome banner inviting them to list their first product.
-
-### 3. ⚡ Live Real-Time Operations (WebSocket Sync)
-- **Instant Stock Auto-Decrement**: When orders are placed, product inventory decrements in real time across all open browser windows.
-- **Order Delay Management**: Sellers can delay an order (`+15m`, `+30m`, `+45m`, `+1h`) with custom reasons (*Heavy Rain*, *Packaging Delay*), which immediately updates the customer's live tracking banner with a glowing amber alert and recalculated ETA.
-- **Order Cancellation & Stock Refund**: If a customer or seller cancels an order, purchased quantities are automatically refunded to inventory.
-- **Harmonic Audio Chimes**: Web Audio API order alerts chime when new orders arrive.
-
-### 4. 📊 Financial Ledger & Monthly Earnings
-- Real-time monthly revenue KPI, fulfillment rate %, pending order counters, and Average Order Value (AOV).
-- Interactive **Daily Revenue Volume Chart** showing day-by-day sales velocity.
-- Top customer repeat-buyer insights.
+> **A Flipkart-Grade Real-Time Order Management System** featuring **VisionOS Neon-Glassmorphism UI**, **Admin Governance & Multi-Admin Approval Chains**, **Seller KYC Verification**, **Smart Apology-First Support Chat**, **Gemini 2.0 Flash AI Insights**, **GST PDF Tax Invoices**, **PWA Offline Support**, **Dark/Light Theme Switching**, **bcrypt Security**, and **Dual SQLite/PostgreSQL Engine**.
 
 ---
 
-## 🔑 Pre-Configured Test Accounts
+## 🌟 What's New in v2.0
 
-| Role | 7-Digit ID | Password | Name / Store | Catalog |
+### 1. 🛡️ Admin Governance & Strict Approval Chain
+- **Zero Default Admin**: No hardcoded admin credentials exist in code.
+- **First-Time Admin Bootstrap**: The initial primary admin is securely initialized via the one-time `/admin/setup` onboarding flow with a custom password.
+- **Admin Approval Chain**: Any subsequent admin registrations are held in `pending_admin_approval` and require explicit approval/rejection by the primary founder admin before they can log in.
+- **Founding Admin Immutability**: The primary founding admin cannot be suspended or demoted (`is_first_admin=1`).
+- **7-Tab Mission-Control Dashboard**:
+  1. **Overview**: Platform GMV, orders, user metrics, real-time charts.
+  2. **Seller Verification**: Review KYC details, approve/reject seller applications.
+  3. **All Users**: Filter, search, and toggle suspension status across customers, sellers, and admins.
+  4. **All Orders**: Global cross-seller order manager with status overrides.
+  5. **Support Desk**: Real-time customer/seller complaint desk with star ratings.
+  6. **Admin Accounts**: Manage permissions and pending admin applications.
+  7. **Platform Config & Coupons**: Inspect environment toggles and platform-wide promo codes.
+
+### 2. 🏪 Seller KYC Verification Protocol
+New sellers must provide full KYC onboarding information before they can list products:
+- **Brand / Store Name** & Contact Name
+- **State Selection** (Full list of Indian states & Union Territories)
+- **Verified Phone Number** & Product Category
+- **Warehouse / Stock Address**
+- **Order Acceptance Mode**: Auto-accept orders or manual seller review
+- **RTO Handling Mode**: Marketplace return logistics or self-inspected warehouse restock
+- **Seller Gating**: Sellers start as `pending_verification` and are blocked from listing items until approved by the admin.
+
+### 3. 💬 Smart Support Chat with Sincere Apology Flow
+- Floating support widget (FAB) available across all customer and seller screens.
+- Instant predefined sympathetic responses for common queries (*Order Tracking*, *Return/Exchange*, *Payment Verification*).
+- **Complaint Protocol**: For any complaint or negative review, the system **always apologizes sincerely first** before asking for 1–5 star ratings and issue descriptions, connecting the user directly to the live Admin Support Desk.
+
+### 4. 🤖 AI, Payments & Financial Documents (Priority 2)
+- **Gemini 2.0 Flash AI**: Auto-generate compelling SEO product descriptions and predictive inventory restock recommendations.
+- **GST Tax Invoices**: Download official A4 PDF invoices generated via ReportLab with 18% GST (CGST/SGST) breakdown.
+- **Razorpay Payments**: Integrated Razorpay payment gateway with live HMAC-SHA256 signature verification and test mock fallback.
+- **Transactional Emails**: Automated email dispatch for registration, order updates, and approvals via Resend.
+
+### 5. 🎨 UI Polish & Progressive Web App (Priority 4)
+- **Installable PWA**: Modern `manifest.json` and service worker (`sw.js`) with network-first caching.
+- **Dark & Light Mode Switcher**: Smooth theme transitions with persisted preferences in `localStorage`.
+- **Seller Storefront Branding**: Sellers can customize their brand color, logo, and banner URL in real time.
+
+---
+
+## 🔑 Test Accounts & Demo Access
+
+| Role | 7-Digit ID | Password | Name / Store | Details |
 | :--- | :--- | :--- | :--- | :--- |
-| **Seller** | `1001001` | `seller123` | **TechNova Electronics** | Headphones, Smartwatches, Keyboards |
-| **Seller** | `1002002` | `seller123` | **Aura Home Living** | Ambient Lamps, Ceramic Mug Sets |
-| **Seller** | `1003003` | `seller123` | **Titanium Fitness Gear** | Yoga Mats, Dumbbells |
-| **Customer** | `7001001` | `customer123` | **Alex Rivera** | Verified Shopper |
-| **Customer** | `7002002` | `customer123` | **Priya Sharma** | Verified Shopper |
+| **Founder Admin** | `9322808` | `AdminSecurePassword@123` | **Founder Admin** | Full Governance & Approvals |
+| **Junior Admin** | `9160649` | `SarahPassword@123` | **Sarah Jenkins** | Approved Junior Admin |
+| **Seller** | `1001001` | `seller123` | **TechNova Electronics** | Electronics Store |
+| **Seller** | `1179862` | `VikramPassword@123` | **Zenith Artisan Crafts** | Verified KYC Seller |
+| **Customer** | `7001001` | `customer123` | **Alex Rivera** | Verified Customer |
+| **Customer** | `7002002` | `customer123` | **Priya Sharma** | Verified Customer |
+
 
 ---
 
