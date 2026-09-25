@@ -52,7 +52,7 @@ print(f"\nUsing Founder Admin ID: {founder_admin_id}")
 print("\n=== 1. LOGIN AS FOUNDER ADMIN ===")
 status, data = req(f"{base}/api/auth/login", "POST", {
     "id": founder_admin_id,
-    "password": "AdminSecurePassword@123",
+    "password": "Soundar@52122",
     "role": "admin"
 })
 print("Founder admin login status:", status)

@@ -303,6 +303,26 @@ function toast(msg, kind="info"){
   setTimeout(()=>{ el.style.opacity="0"; el.style.transition="opacity .4s"; setTimeout(()=>el.remove(),400); }, 3800);
 }
 
+/* ================= PASSWORD VISIBILITY TOGGLE ================= */
+function togglePasswordVisibility(inputId, btn){
+  const input = document.getElementById(inputId);
+  if(!input) return;
+  const isPw = input.type === "password";
+  input.type = isPw ? "text" : "password";
+  btn.innerHTML = isPw 
+    ? `<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"/></svg>`
+    : `<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-white/50 hover:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>`;
+  btn.title = isPw ? "Hide password" : "Show password";
+}
+
+function fillAdminLogin(id, pw){
+  const idInput = document.getElementById("loginIdInput");
+  const pwInput = document.getElementById("loginPwInput");
+  if(idInput) idInput.value = id;
+  if(pwInput) pwInput.value = pw;
+  performIdLogin(id, pw, "admin");
+}
+
 async function api(path, opts={}){
   const headers = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
   if(state.token) headers["Authorization"] = "Bearer " + state.token;
@@ -573,29 +593,52 @@ async function renderLogin(){
         <button id="roleAdminBtn" class="tab flex-1 ${currentRole==='admin'?'active':''}">🔐 Admin</button>
       </div>
 
-      <!-- 7-Digit ID Login Form -->
+      <!-- ID Login Form (Customer, Seller & Admin) -->
       <form id="idLoginForm" class="space-y-4 mb-5">
         <div>
           <label class="block text-xs font-semibold text-white/70 mb-1 flex justify-between">
-            <span id="idInputLabel">${currentRole==='seller' ? '7-Digit Seller ID' : (currentRole==='admin' ? '7-Digit Admin ID' : '7-Digit Customer ID')}</span>
-            <span class="text-[10px] text-cyan-300 font-mono">Exactly 7 digits</span>
+            <span id="idInputLabel">${currentRole==='seller' ? '7-Digit Seller ID' : (currentRole==='admin' ? '6-Digit Admin ID' : '7-Digit Customer ID')}</span>
+            <span id="idLengthHint" class="text-[10px] text-cyan-300 font-mono">${currentRole==='admin' ? '6 digits' : 'Exactly 7 digits'}</span>
           </label>
-          <input id="loginIdInput" required type="text" maxlength="7" pattern="[0-9]{7}" placeholder="${currentRole==='seller' ? '1001001' : (currentRole==='admin' ? '9000001' : '7001001')}" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono text-white focus:outline-none focus:border-cyan-400 placeholder-white/30 tracking-wider text-base" />
+          <input id="loginIdInput" required type="text" maxlength="7" pattern="[0-9]{6,7}" placeholder="${currentRole==='seller' ? '1001001' : (currentRole==='admin' ? '956673' : '7001001')}" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono text-white focus:outline-none focus:border-cyan-400 placeholder-white/30 tracking-wider text-base" />
         </div>
 
         <div>
           <label class="block text-xs font-semibold text-white/70 mb-1">Password</label>
-          <input id="loginPwInput" required type="password" placeholder="••••••••" class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400 placeholder-white/30" />
+          <div class="relative">
+            <input id="loginPwInput" required type="password" placeholder="••••••••" class="w-full bg-white/5 border border-white/10 rounded-xl pl-4 pr-11 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400 placeholder-white/30" />
+            <button type="button" onclick="togglePasswordVisibility('loginPwInput', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-cyan-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            </button>
+          </div>
         </div>
 
-        <button type="submit" class="btn-neon w-full font-bold py-3 text-sm cursor-pointer shadow-lg hover:scale-[1.01] transition-transform">
-          Sign In with 7-Digit ID →
+        <button type="submit" id="submitLoginBtn" class="btn-neon w-full font-bold py-3 text-sm cursor-pointer shadow-lg hover:scale-[1.01] transition-transform">
+          ${currentRole==='admin' ? 'Sign In as Admin (ID: 956673) →' : 'Sign In with 7-Digit ID →'}
         </button>
       </form>
 
-      <!-- Admin Provisioning Section (Shown for Admin Role) -->
+      <!-- Admin Provisioning & 1-Click Founder Login (Shown for Admin Role) -->
       <div id="adminActionSection" class="pt-4 border-t border-white/10 mb-4 ${currentRole==='admin'?'':'hidden'}">
-        <p class="text-[11px] uppercase tracking-wider text-white/50 font-bold mb-2.5 flex items-center justify-between">
+        <p class="text-[11px] uppercase tracking-wider text-white/50 font-bold mb-2 flex items-center justify-between">
+          <span>👑 Master Founder Admin:</span>
+          <span class="text-cyan-300 font-mono text-[10px]">6-Digit ID</span>
+        </p>
+        <button type="button" class="quick-chip glass w-full px-3.5 py-2.5 rounded-xl text-left flex items-center justify-between border border-cyan-500/40 hover:border-cyan-400 transition-all cursor-pointer text-xs mb-3 bg-cyan-500/5" onclick="fillAdminLogin('956673', 'Soundar@52122')">
+          <div class="flex items-center gap-2.5">
+            <span class="text-xl">🛡️</span>
+            <div>
+              <p class="font-bold text-white flex items-center gap-1.5">
+                <span>Soundararajan</span>
+                <span class="text-[9px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded font-bold">Founder Admin</span>
+              </p>
+              <p class="text-[10px] text-white/50 font-mono">ID: #956673 · Password: Soundar@52122</p>
+            </div>
+          </div>
+          <span class="text-[10px] px-2 py-1 rounded bg-cyan-500/20 text-cyan-300 font-medium">1-Click Sign In</span>
+        </button>
+
+        <p class="text-[11px] uppercase tracking-wider text-white/50 font-bold mb-2 flex items-center justify-between">
           <span>🔑 Admin Provisioning & Approvals:</span>
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -622,7 +665,7 @@ async function renderLogin(){
       <!-- Register / Onboarding Link -->
       <div class="text-center pt-3 border-t border-white/5">
         <p class="text-xs text-white/50" id="regPromptContainer">
-          <span id="regPromptText">Don't have a 7-digit ID?</span>
+          <span id="regPromptText">Don't have an ID?</span>
           <button id="openRegisterModalBtn" class="text-cyan-300 font-semibold hover:underline cursor-pointer ml-1">
             ${currentRole==='seller' ? 'Register Seller Store (KYC)' : (currentRole==='admin' ? 'Apply for Admin Access' : 'Register Customer Account')}
           </button>
@@ -633,34 +676,46 @@ async function renderLogin(){
 
   function updateLoginUi(){
     const label = document.getElementById("idInputLabel");
+    const lengthHint = document.getElementById("idLengthHint");
     const input = document.getElementById("loginIdInput");
     const pw = document.getElementById("loginPwInput");
+    const submitBtn = document.getElementById("submitLoginBtn");
     const adminSec = document.getElementById("adminActionSection");
     const quickSec = document.getElementById("quickProfilesSection");
     const regBtn = document.getElementById("openRegisterModalBtn");
 
     if(currentRole === "seller"){
       label.textContent = "7-Digit Seller ID";
+      if(lengthHint) lengthHint.textContent = "Exactly 7 digits";
       input.placeholder = "1001001";
+      input.pattern = "[0-9]{7}";
       pw.value = "seller123";
+      if(submitBtn) submitBtn.textContent = "Sign In to Seller Hub →";
       adminSec.classList.add("hidden");
       quickSec.classList.remove("hidden");
       regBtn.textContent = "Register Seller Store (KYC)";
     } else if(currentRole === "admin"){
-      label.textContent = "7-Digit Admin ID";
-      input.placeholder = "9000001";
-      pw.value = "";
+      label.textContent = "6-Digit Admin ID";
+      if(lengthHint) lengthHint.textContent = "6 digits (e.g. 956673)";
+      input.placeholder = "956673";
+      input.pattern = "[0-9]{6,7}";
+      pw.value = "Soundar@52122";
+      if(submitBtn) submitBtn.textContent = "Sign In as Admin (ID: 956673) →";
       adminSec.classList.remove("hidden");
       quickSec.classList.add("hidden");
       regBtn.textContent = "Apply for Admin Access";
     } else {
       label.textContent = "7-Digit Customer ID";
+      if(lengthHint) lengthHint.textContent = "Exactly 7 digits";
       input.placeholder = "7001001";
+      input.pattern = "[0-9]{7}";
       pw.value = "customer123";
+      if(submitBtn) submitBtn.textContent = "Sign In with 7-Digit ID →";
       adminSec.classList.add("hidden");
       quickSec.classList.remove("hidden");
       regBtn.textContent = "Register Customer Account";
     }
+
 
     // Render quick profile chips
     const qRoot = document.getElementById("quickProfilesContainer");
@@ -788,7 +843,12 @@ function openCustomerRegisterModal(){
 
           <div>
             <label class="block text-xs font-semibold text-white/70 mb-1">Set Password</label>
-            <input id="regCustPassword" required type="password" minlength="4" placeholder="At least 4 characters" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+            <div class="relative">
+              <input id="regCustPassword" required type="password" minlength="4" placeholder="At least 4 characters" class="w-full bg-white/5 border border-white/10 rounded-xl pl-3.5 pr-11 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+              <button type="button" onclick="togglePasswordVisibility('regCustPassword', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-cyan-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
           </div>
 
           <div class="pt-3 flex justify-end gap-2">
@@ -991,7 +1051,12 @@ function openSellerKycModal(){
 
             <div>
               <label class="block text-xs font-semibold text-white/80 mb-1">Set Password *</label>
-              <input id="kycPassword" required type="password" minlength="4" placeholder="At least 4 characters" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+              <div class="relative">
+                <input id="kycPassword" required type="password" minlength="4" placeholder="At least 4 characters" class="w-full bg-white/5 border border-white/10 rounded-xl pl-3.5 pr-11 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+                <button type="button" onclick="togglePasswordVisibility('kycPassword', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-cyan-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                </button>
+              </div>
             </div>
 
             <!-- KYC Verification Notice -->
@@ -1161,7 +1226,12 @@ async function openAdminSetupModal(){
 
           <div>
             <label class="block text-xs font-semibold text-white/80 mb-1">Set Strong Password (min 8 chars) *</label>
-            <input id="adminSetupPassword" required type="password" minlength="8" placeholder="••••••••••••" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            <div class="relative">
+              <input id="adminSetupPassword" required type="password" minlength="8" placeholder="••••••••••••" class="w-full bg-white/5 border border-white/10 rounded-xl pl-3.5 pr-11 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+              <button type="button" onclick="togglePasswordVisibility('adminSetupPassword', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-cyan-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
           </div>
 
           <div class="pt-2 flex justify-end gap-2">
@@ -1184,7 +1254,7 @@ async function openAdminSetupModal(){
         body: JSON.stringify({ name, email, password })
       });
       closeModal();
-      alert(`🎉 Master Admin Account Created!\n\nYour 7-Digit Admin ID is: ${data.generated_id}\n\nPlease save this ID to log in anytime!`);
+      alert(`🎉 Master Admin Account Created!\n\nYour Admin ID is: ${data.generated_id}\n\nPlease save this ID to log in anytime!`);
       // Auto-fill and login
       document.getElementById("roleAdminBtn").click();
       document.getElementById("loginIdInput").value = data.generated_id;
@@ -1221,8 +1291,14 @@ function openAdminApplyModal(){
 
           <div>
             <label class="block text-xs font-semibold text-white/80 mb-1">Set Password (min 8 chars) *</label>
-            <input id="adminApplyPassword" required type="password" minlength="8" placeholder="••••••••••••" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            <div class="relative">
+              <input id="adminApplyPassword" required type="password" minlength="8" placeholder="••••••••••••" class="w-full bg-white/5 border border-white/10 rounded-xl pl-3.5 pr-11 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400" />
+              <button type="button" onclick="togglePasswordVisibility('adminApplyPassword', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-cyan-300 transition-colors cursor-pointer p-1" title="Show/Hide Password">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
           </div>
+
 
           <div>
             <label class="block text-xs font-semibold text-white/80 mb-1">Reason for Admin Privileges</label>

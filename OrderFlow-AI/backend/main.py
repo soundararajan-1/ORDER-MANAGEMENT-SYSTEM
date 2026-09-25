@@ -123,7 +123,14 @@ def _fetchall(conn, sql: str, params=()):
 
 def generate_id(role: str, conn) -> str:
     import random
-    prefix_map = {"seller": 1, "customer": 7, "admin": 9}
+    if role == "admin":
+        for _ in range(200):
+            candidate = f"9{random.randint(10000, 99999)}"
+            exists = _fetchone(conn, "SELECT 1 FROM users WHERE id=?", (candidate,))
+            if not exists:
+                return candidate
+        return "956673"
+    prefix_map = {"seller": 1, "customer": 7}
     prefix = prefix_map.get(role, 8)
     for _ in range(200):
         candidate = f"{prefix}{random.randint(100000, 999999)}"
@@ -341,6 +348,30 @@ def init_db():
             ph = existing.get("password_hash", "") if isinstance(existing, dict) else existing["password_hash"]
             if ph and len(ph) == 64 and not ph.startswith("$2"):
                 _exec(conn, "UPDATE users SET password_hash=? WHERE id=?", (hash_pw(upw), uid))
+
+    # Ensure Founder Admin is 956673 with password Soundar@52122
+    founder_existing = _fetchone(conn, "SELECT id FROM users WHERE id='956673' OR is_first_admin=1", ())
+    now_iso = datetime.utcnow().isoformat()
+    if founder_existing:
+        old_id = founder_existing["id"]
+        _exec(conn,
+            """UPDATE users SET id='956673', name='Soundararajan', email='soundarrajan5212@gmail.com',
+                                password_hash=?, role='admin', status='active', is_first_admin=1
+               WHERE id=? OR is_first_admin=1""",
+            (hash_pw("Soundar@52122"), old_id))
+        if old_id != "956673":
+            try:
+                _exec(conn, "UPDATE support_tickets SET user_id='956673' WHERE user_id=?", (old_id,))
+                _exec(conn, "UPDATE support_tickets SET resolved_by='956673' WHERE resolved_by=?", (old_id,))
+                _exec(conn, "UPDATE support_messages SET sender_id='956673' WHERE sender_id=?", (old_id,))
+            except Exception:
+                pass
+    else:
+        _exec(conn,
+            """INSERT INTO users (id, name, email, password_hash, role, picture, status, is_first_admin, created_at)
+               VALUES ('956673', 'Soundararajan', 'soundarrajan5212@gmail.com', ?, 'admin',
+                       'https://api.dicebear.com/7.x/identicon/svg?seed=Soundararajan', 'active', 1, ?)""",
+            (hash_pw("Soundar@52122"), now_iso))
 
     # Seed products
     seller_seed_products = [
@@ -591,10 +622,10 @@ def login(body: LoginBody):
     clean_id = body.id.strip()
     role = body.role.strip().lower()
 
-    # Admin login uses 9-digit IDs; seller 1-digit prefix; customer 7-digit prefix
+    # Admin login uses 6-digit IDs (e.g. 956673) or 7-digit IDs; seller & customer use 7-digit IDs
     if role == "admin":
-        if not clean_id.isdigit() or len(clean_id) != 7:
-            raise HTTPException(400, "Admin ID must be exactly 7 digits")
+        if not clean_id.isdigit() or len(clean_id) not in (6, 7):
+            raise HTTPException(400, "Admin ID must be 6 digits (e.g. 956673)")
     elif role in ("customer", "seller"):
         if not clean_id.isdigit() or len(clean_id) != 7:
             raise HTTPException(400, "ID must be exactly 7 digits")
@@ -861,11 +892,12 @@ async def admin_register(body: AdminRegisterBody):
 @app.get("/api/auth/quick-profiles")
 def quick_profiles():
     conn = db()
-    rows = _fetchall(conn, "SELECT id, name, email, role, picture, status FROM users ORDER BY id ASC")
+    rows = _fetchall(conn, "SELECT id, name, email, role, picture, status, is_first_admin FROM users ORDER BY id ASC")
     conn.close()
     sellers = [r for r in rows if r["role"] == "seller" and r.get("status") == "active"]
     customers = [r for r in rows if r["role"] == "customer" and r.get("status") == "active"]
-    return {"sellers": sellers, "customers": customers}
+    admins = [r for r in rows if r["role"] == "admin" and r.get("status") == "active"]
+    return {"sellers": sellers, "customers": customers, "admins": admins}
 
 
 # ---------------------------------------------------------------- admin dashboard endpoints

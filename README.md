@@ -50,12 +50,12 @@ New sellers must provide full KYC onboarding information before they can list pr
 
 ## 🔑 Test Accounts & Demo Access
 
-| Role | 7-Digit ID | Password | Name / Store | Details |
+| Role | ID | Password | Name / Store | Details |
 | :--- | :--- | :--- | :--- | :--- |
-| **Founder Admin** | `9322808` | `AdminSecurePassword@123` | **Founder Admin** | Full Governance & Approvals |
-| **Junior Admin** | `9160649` | `SarahPassword@123` | **Sarah Jenkins** | Approved Junior Admin |
+| **Founder Admin** | `956673` *(6 Digits)* | `Soundar@52122` | **Soundararajan** | Master Founder Admin · Full Governance & Approvals |
+| **Junior Admin** | `989809` | `SarahPassword@123` | **Sarah Jenkins** | Approved Junior Admin |
 | **Seller** | `1001001` | `seller123` | **TechNova Electronics** | Electronics Store |
-| **Seller** | `1179862` | `VikramPassword@123` | **Zenith Artisan Crafts** | Verified KYC Seller |
+| **Seller** | `1138864` | `VikramPassword@123` | **Zenith Artisan Crafts** | Verified KYC Seller |
 | **Customer** | `7001001` | `customer123` | **Alex Rivera** | Verified Customer |
 | **Customer** | `7002002` | `customer123` | **Priya Sharma** | Verified Customer |
 
