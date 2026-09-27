@@ -22,6 +22,7 @@ import uuid
 import hmac
 import hashlib
 import io
+import random
 from datetime import datetime, timedelta
 from typing import Optional, List
 
@@ -196,7 +197,21 @@ def init_db():
             seller_id TEXT,
             seller_name TEXT DEFAULT '',
             icon TEXT DEFAULT '📦',
-            description TEXT DEFAULT ''
+            description TEXT DEFAULT '',
+            images TEXT DEFAULT '[]'
+        )
+    """)
+
+    # -- product reviews --
+    _exec(conn, """
+        CREATE TABLE IF NOT EXISTS product_reviews (
+            id TEXT PRIMARY KEY,
+            product_id TEXT,
+            customer_id TEXT,
+            customer_name TEXT,
+            rating INTEGER DEFAULT 5,
+            comment TEXT DEFAULT '',
+            created_at TEXT
         )
     """)
 
@@ -283,6 +298,26 @@ def init_db():
         )
     """)
 
+    # -- autonomous ai sentinel logs --
+    _exec(conn, """
+        CREATE TABLE IF NOT EXISTS sentinel_logs (
+            id TEXT PRIMARY KEY,
+            order_id TEXT,
+            customer_id TEXT,
+            customer_name TEXT,
+            seller_id TEXT,
+            seller_name TEXT,
+            trigger_event TEXT,
+            delay_reason TEXT,
+            severity TEXT,
+            compensation_code TEXT,
+            compensation_amount REAL,
+            ai_analysis TEXT,
+            customer_message TEXT,
+            created_at TEXT
+        )
+    """)
+
     # Dynamic column migrations for existing DBs
     try:
         for col, defn in [
@@ -317,7 +352,7 @@ def init_db():
         except Exception:
             pass
 
-        for col, defn in [("description", "TEXT DEFAULT ''")]:
+        for col, defn in [("description", "TEXT DEFAULT ''"), ("images", "TEXT DEFAULT '[]'")]:
             try:
                 _exec(conn, f"ALTER TABLE products ADD COLUMN {col} {defn}")
             except Exception:
@@ -387,25 +422,65 @@ def init_db():
     # Seed products
     seller_seed_products = [
         ("1001001", "TechNova Electronics", [
-            ("Wireless Earbuds Pro", 2499, 40, "Electronics", "🎧"),
-            ("Neon Mechanical Keyboard", 4599, 15, "Electronics", "⌨️"),
+            ("Wireless Earbuds Pro", 2499, 40, "Electronics", "🎧",
+             ["https://images.unsplash.com/photo-1590658268037-6bf12165a8df?w=600",
+              "https://images.unsplash.com/photo-1572536147248-ac59a8abfa4b?w=600",
+              "https://images.unsplash.com/photo-1598331668826-20cecc596b86?w=600"]),
+            ("Neon Mechanical Keyboard", 4599, 15, "Electronics", "⌨️",
+             ["https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=600",
+              "https://images.unsplash.com/photo-1618384887929-16ec33fab9ef?w=600"]),
         ]),
         ("1002002", "Aura Home Living", [
-            ("Aurora Desk Lamp", 1299, 25, "Home", "💡"),
-            ("Cosmic Ceramic Mug", 349, 100, "Home", "☕"),
+            ("Aurora Desk Lamp", 1299, 25, "Home", "💡",
+             ["https://images.unsplash.com/photo-1507473885765-e6ed057f782c?w=600",
+              "https://images.unsplash.com/photo-1513506003901-1e6a229e2d15?w=600"]),
+            ("Cosmic Ceramic Mug", 349, 100, "Home", "☕",
+             ["https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=600"]),
         ]),
         ("1003003", "Titanium Fitness Gear", [
-            ("Glow Yoga Mat", 999, 30, "Fitness", "🧘"),
-            ("Titanium Water Bottle", 799, 60, "Fitness", "🧴"),
+            ("Glow Yoga Mat", 999, 30, "Fitness", "🧘",
+             ["https://images.unsplash.com/photo-1601925260368-ae2f83cf8b7f?w=600"]),
+            ("Titanium Water Bottle", 799, 60, "Fitness", "🧴",
+             ["https://images.unsplash.com/photo-1602143407151-7111542de6e8?w=600"]),
         ]),
     ]
     for sid, sname, prod_list in seller_seed_products:
-        for pname, price, stock, cat, icon in prod_list:
-            existing = _fetchone(conn, "SELECT id FROM products WHERE name=? AND seller_id=?", (pname, sid))
+        for pitem in prod_list:
+            pname, price, stock, cat, icon = pitem[0], pitem[1], pitem[2], pitem[3], pitem[4]
+            pimages = pitem[5] if len(pitem) > 5 else []
+            images_json = json.dumps(pimages[:5])
+            existing = _fetchone(conn, "SELECT id, images FROM products WHERE name=? AND seller_id=?", (pname, sid))
             if not existing:
                 _exec(conn,
-                    "INSERT INTO products (id, name, price, stock, category, seller_id, seller_name, icon) VALUES (?,?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4())[:8].upper(), pname, price, stock, cat, sid, sname, icon))
+                    "INSERT INTO products (id, name, price, stock, category, seller_id, seller_name, icon, images) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4())[:8].upper(), pname, price, stock, cat, sid, sname, icon, images_json))
+            else:
+                curr_img = existing.get("images") if isinstance(existing, dict) else existing["images"]
+                if not curr_img or curr_img == "[]":
+                    _exec(conn, "UPDATE products SET images=? WHERE id=?", (images_json, existing["id"]))
+
+    # Seed default sample customer reviews
+    rev_count = _fetchone(conn, "SELECT COUNT(*) as c FROM product_reviews", ())
+    if not rev_count or rev_count["c"] == 0:
+        earbuds = _fetchone(conn, "SELECT id FROM products WHERE name='Wireless Earbuds Pro'", ())
+        keyboard = _fetchone(conn, "SELECT id FROM products WHERE name='Neon Mechanical Keyboard'", ())
+        if earbuds:
+            _exec(conn,
+                """INSERT INTO product_reviews (id, product_id, customer_id, customer_name, rating, comment, created_at)
+                   VALUES ('REV-101', ?, '7001001', 'Alex Rivera', 5,
+                           'Outstanding soundstage and active noise cancellation! Battery easily lasts all day. Highly recommended.', ?)""",
+                (earbuds["id"], now_iso))
+            _exec(conn,
+                """INSERT INTO product_reviews (id, product_id, customer_id, customer_name, rating, comment, created_at)
+                   VALUES ('REV-102', ?, '7002002', 'Priya Sharma', 4,
+                           'Very comfortable in ears during jogging. Build quality is top notch for this price.', ?)""",
+                (earbuds["id"], now_iso))
+        if keyboard:
+            _exec(conn,
+                """INSERT INTO product_reviews (id, product_id, customer_id, customer_name, rating, comment, created_at)
+                   VALUES ('REV-103', ?, '7001001', 'Alex Rivera', 5,
+                           'The RGB neon backlighting and tactile switches are super satisfying. Great response time!', ?)""",
+                (keyboard["id"], now_iso))
 
     # Seed default coupons
     default_coupons = [
@@ -1500,6 +1575,360 @@ def ai_demand_insights(seller_id: str, user=Depends(get_current_user)):
         }
 
 
+# ---------------------------------------------------------------- Autonomous AI Sentinel & Judge Sandbox
+
+async def trigger_sentinel_for_delay(order_id: str, reason: str, delay_minutes: int = 30) -> dict:
+    """
+    Autonomous AI Sentinel:
+    1. Analyzes delay severity and customer impact.
+    2. Calculates customer retention compensation (dynamic apology coupon).
+    3. Auto-creates the coupon in the coupons table.
+    4. Generates an empathetic apology via Gemini 2.0 Flash (or smart heuristic).
+    5. Injects automated explanation into order_messages.
+    6. Logs intervention into sentinel_logs table.
+    7. Broadcasts real-time WebSocket events to Customer, Seller, and Admin.
+    """
+    conn = db()
+    order = _fetchone(conn, "SELECT * FROM orders WHERE id=?", (order_id,))
+    if not order:
+        conn.close()
+        return {"error": "Order not found"}
+
+    now = datetime.utcnow().isoformat()
+    customer_id = order["customer_id"]
+    customer_name = order["customer_name"]
+    seller_id = order["seller_id"]
+    seller_name = order.get("seller_name") or "Verified Seller"
+    order_amount = float(order.get("amount") or 500.0)
+
+    # Calculate severity & retention discount
+    if delay_minutes >= 45:
+        severity = "Critical"
+        discount_amount = 100.0
+    elif delay_minutes >= 30:
+        severity = "High"
+        discount_amount = 75.0
+    else:
+        severity = "Moderate"
+        discount_amount = 50.0
+
+    # Generate unique coupon code
+    suffix = str(uuid.uuid4())[:4].upper()
+    order_part = order_id[:4].upper() if len(order_id) >= 4 else order_id.upper()
+    coupon_code = f"SENTINEL-{order_part}-{suffix}"
+    coupon_id = f"COUP-{coupon_code}"
+
+    # Auto-register coupon in DB so customer can redeem immediately
+    try:
+        _exec(conn,
+            """INSERT INTO coupons (id, code, discount_type, discount_value, min_order, seller_id, is_active, created_at)
+               VALUES (?, ?, 'flat', ?, 100.0, 'all', 1, ?)""",
+            (coupon_id, coupon_code, discount_amount, now))
+        conn.commit()
+    except Exception as e:
+        print(f"[Sentinel] Coupon creation error: {e}")
+
+    customer_msg = (
+        f"Dear {customer_name}, our autonomous AI Sentinel detected an unexpected transit disruption ({reason}). "
+        f"We respect your time immensely and sincerely apologize for the delay. To make things right, we've automatically "
+        f"credited a ₹{int(discount_amount)} courtesy voucher ({coupon_code}) to your account for your next purchase."
+    )
+    ai_analysis = (
+        f"Autonomous retention protocol triggered: {severity} severity logistics anomaly (+{delay_minutes}m). "
+        f"Courtesy voucher {coupon_code} (₹{int(discount_amount)} OFF) auto-issued to protect seller repeat rate and prevent negative rating."
+    )
+
+    if GEMINI_API_KEY:
+        try:
+            from google import genai
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            prompt = (
+                f"You are the autonomous AI Supply Chain Sentinel for OrderFlow AI.\n"
+                f"Order #{order_id} (Customer: {customer_name}, Seller: {seller_name}) is delayed by {delay_minutes} mins.\n"
+                f"Reason: {reason}.\n"
+                f"Compensation Voucher Issued: {coupon_code} (₹{int(discount_amount)} OFF).\n\n"
+                f"Produce a JSON response with exactly two keys:\n"
+                f"1. 'customer_message': A deeply empathetic 2-sentence delay apology note to {customer_name}, explaining the delay and mentioning coupon code {coupon_code} for ₹{int(discount_amount)} OFF.\n"
+                f"2. 'ai_analysis': A concise 1-sentence operational assessment and retention advice for admin/seller.\n"
+                f"Return valid raw JSON only without markdown formatting."
+            )
+            resp = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+            raw_text = resp.text.strip()
+            if raw_text.startswith("```"):
+                raw_text = raw_text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            data = json.loads(raw_text)
+            if "customer_message" in data and data["customer_message"]:
+                customer_msg = data["customer_message"]
+            if "ai_analysis" in data and data["ai_analysis"]:
+                ai_analysis = data["ai_analysis"]
+        except Exception as e:
+            print(f"[Sentinel] Gemini call failed, heuristic fallback used: {e}")
+
+    # Insert into order_messages so it appears in the order chat
+    msg_id = str(uuid.uuid4())[:8].upper()
+    try:
+        _exec(conn,
+            """INSERT INTO order_messages (id, order_id, sender_id, sender_name, sender_role, message, timestamp)
+               VALUES (?,?,?,?,?,?,?)""",
+            (msg_id, order_id, "AI_SENTINEL", "OrderFlow AI Sentinel 🤖", "system", customer_msg, now))
+    except Exception as e:
+        print(f"[Sentinel] Message insert: {e}")
+
+    # Record log in sentinel_logs
+    log_id = f"SNT-{str(uuid.uuid4())[:8].upper()}"
+    log_entry = {
+        "id": log_id,
+        "order_id": order_id,
+        "customer_id": customer_id,
+        "customer_name": customer_name,
+        "seller_id": seller_id,
+        "seller_name": seller_name,
+        "trigger_event": "Logistics Delay Anomaly",
+        "delay_reason": reason,
+        "severity": severity,
+        "compensation_code": coupon_code,
+        "compensation_amount": discount_amount,
+        "ai_analysis": ai_analysis,
+        "customer_message": customer_msg,
+        "created_at": now
+    }
+    try:
+        _exec(conn,
+            """INSERT INTO sentinel_logs (id, order_id, customer_id, customer_name, seller_id, seller_name,
+                                          trigger_event, delay_reason, severity, compensation_code,
+                                          compensation_amount, ai_analysis, customer_message, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (log_id, order_id, customer_id, customer_name, seller_id, seller_name,
+             log_entry["trigger_event"], reason, severity, coupon_code, discount_amount,
+             ai_analysis, customer_msg, now))
+        conn.commit()
+    except Exception as e:
+        print(f"[Sentinel] Log insert error: {e}")
+    conn.close()
+
+    # WebSocket Broadcasts
+    await manager.send_user(customer_id, {
+        "type": "sentinel_intervention",
+        "order_id": order_id,
+        "coupon_code": coupon_code,
+        "discount_amount": discount_amount,
+        "message": customer_msg,
+        "ai_analysis": ai_analysis,
+        "severity": severity,
+        "delay_reason": reason,
+    })
+
+    await manager.send_user(seller_id, {
+        "type": "sentinel_alert",
+        "order_id": order_id,
+        "coupon_code": coupon_code,
+        "discount_amount": discount_amount,
+        "severity": severity,
+        "reason": reason,
+        "message": f"Autonomous Sentinel intervened on Order #{order_id} with courtesy voucher {coupon_code} to safeguard store reputation."
+    })
+
+    await manager.broadcast_role("admin", {
+        "type": "sentinel_audit",
+        "log": log_entry
+    })
+
+    return log_entry
+
+
+def _seed_demo_order(conn) -> dict:
+    """Helper to seed a valid demo order if database is empty."""
+    now = datetime.utcnow().isoformat()
+    oid = str(uuid.uuid4())[:8].upper()
+    eta = (datetime.utcnow() + timedelta(minutes=45)).strftime("%H:%M")
+    items = [{"product_id": "P-DEMO", "name": "Wireless Noise-Canceling Earbuds Pro", "price": 2499.0, "qty": 1}]
+    _exec(conn,
+        """INSERT INTO orders (id, customer_id, customer_name, seller_id, seller_name, items, amount,
+                               status, eta, delay_reason, payment_method, payment_status, shipping_address,
+                               created_at, updated_at)
+           VALUES (?, '7001001', 'Alex Rivera', '1001001', 'TechNova Electronics', ?, 2499.0,
+                   'Processing', ?, '', 'UPI', 'Paid', 'Flat 402, Indiranagar, Bangalore', ?, ?)""",
+        (oid, json.dumps(items), eta, now, now))
+    conn.commit()
+    return _fetchone(conn, "SELECT * FROM orders WHERE id=?", (oid,))
+
+
+class SimulateDelayBody(BaseModel):
+    order_id: Optional[str] = None
+    reason: Optional[str] = None
+    delay_minutes: Optional[int] = 35
+
+
+@app.post("/api/sandbox/simulate-delay")
+async def sandbox_simulate_delay(body: Optional[SimulateDelayBody] = None):
+    """
+    1-Click Judge Demo Trigger:
+    Simulates real-world logistics courier breakdown / road flood,
+    instantly activating the AI Sentinel to self-heal customer dissatisfaction.
+    """
+    req_order_id = body.order_id if body else None
+    delay_mins = (body.delay_minutes or 35) if body else 35
+    delay_reasons = [
+        "Highway Express Cargo Hub #3 Weather Flood Alert",
+        "Interstate Transit Freight Heavy Congestion & Mountain Detour",
+        "Regional Sorting Conveyor Belt Jam at Sector 18 Facility",
+        "Last-Mile Electric Van Battery Anomaly on Ring Road"
+    ]
+    reason = (body.reason if (body and body.reason) else random.choice(delay_reasons))
+
+    conn = db()
+    target_order = None
+    if req_order_id:
+        target_order = _fetchone(conn, "SELECT * FROM orders WHERE id=?", (req_order_id,))
+
+    if not target_order:
+        target_order = _fetchone(conn, "SELECT * FROM orders WHERE status != 'Cancelled' ORDER BY created_at DESC LIMIT 1", ())
+
+    if not target_order:
+        target_order = _seed_demo_order(conn)
+
+    order_id = target_order["id"]
+    new_eta = (datetime.utcnow() + timedelta(minutes=delay_mins)).strftime("%H:%M")
+    now = datetime.utcnow().isoformat()
+    _exec(conn, "UPDATE orders SET status='Delayed', eta=?, delay_reason=?, updated_at=? WHERE id=?",
+          (new_eta, reason, now, order_id))
+    conn.commit()
+    updated = _fetchone(conn, "SELECT * FROM orders WHERE id=?", (order_id,))
+    conn.close()
+
+    if updated:
+        try:
+            updated["items"] = json.loads(updated["items"])
+        except Exception:
+            updated["items"] = []
+        await manager.send_user(updated["customer_id"], {"type": "status_update", "order": updated})
+        await manager.send_user(updated["seller_id"], {"type": "status_update", "order": updated})
+
+    sentinel_result = await trigger_sentinel_for_delay(order_id, reason, delay_mins)
+
+    return {
+        "success": True,
+        "message": f"Logistics delay simulated on Order #{order_id}!",
+        "order": updated,
+        "sentinel": sentinel_result
+    }
+
+
+@app.post("/api/sandbox/simulate-rush")
+async def sandbox_simulate_rush():
+    """
+    1-Click Judge Demo Trigger:
+    Simulates 5 rapid multi-customer orders across sellers with live GMV recalculation
+    and instant WebSocket broadcasts.
+    """
+    conn = db()
+    products = _fetchall(conn, "SELECT * FROM products WHERE stock > 0 ORDER BY stock DESC LIMIT 10", ())
+    if not products:
+        conn.close()
+        raise HTTPException(400, "No in-stock products available to simulate rush.")
+
+    indian_buyers = [
+        ("7001001", "Alex Rivera", "Flat 402, Indiranagar, Bangalore"),
+        ("7002002", "Priya Sharma", "B-12, Sector 62, Noida, NCR"),
+        ("7003001", "Arjun Nair", "Marine Drive Sea Face, Mumbai"),
+        ("7004002", "Ananya Deshmukh", "Koregaon Park Phase 2, Pune"),
+        ("7005003", "Karthik Swaminathan", "Besant Nagar Beach Road, Chennai")
+    ]
+
+    created_orders = []
+    total_gmv = 0.0
+    now = datetime.utcnow().isoformat()
+
+    for uid, uname, uaddr in indian_buyers:
+        prod = random.choice(products)
+        qty = random.randint(1, 2)
+        price = float(prod["price"])
+        amount = round(price * qty, 2)
+        oid = str(uuid.uuid4())[:8].upper()
+        eta = (datetime.utcnow() + timedelta(minutes=random.randint(30, 60))).strftime("%H:%M")
+
+        _exec(conn, "UPDATE products SET stock = MAX(0, stock - ?) WHERE id=?", (qty, prod["id"]))
+
+        items = [{"product_id": prod["id"], "name": prod["name"], "price": price, "qty": qty}]
+        _exec(conn,
+            """INSERT INTO orders (id, customer_id, customer_name, seller_id, seller_name, items, amount,
+                                   status, eta, delay_reason, payment_method, payment_status, shipping_address,
+                                   created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (oid, uid, uname, prod["seller_id"], prod.get("seller_name") or "Verified Seller",
+             json.dumps(items), amount, "Placed", eta, "", "UPI", "Paid", uaddr, now, now))
+
+        order_obj = {
+            "id": oid, "customer_id": uid, "customer_name": uname,
+            "seller_id": prod["seller_id"], "seller_name": prod.get("seller_name") or "Verified Seller",
+            "items": items, "amount": amount, "status": "Placed", "eta": eta,
+            "payment_method": "UPI", "payment_status": "Paid", "created_at": now
+        }
+        created_orders.append(order_obj)
+        total_gmv += amount
+        await manager.send_user(prod["seller_id"], {"type": "new_order", "order": order_obj})
+
+    conn.commit()
+    conn.close()
+
+    await manager.broadcast_all({
+        "type": "rush_sale_event",
+        "orders_count": len(created_orders),
+        "total_gmv": total_gmv,
+        "message": f"⚡ Live Flash Sale Rush! {len(created_orders)} concurrent orders processed (+₹{int(total_gmv):,})"
+    })
+
+    return {
+        "success": True,
+        "orders_count": len(created_orders),
+        "total_gmv_added": total_gmv,
+        "orders": created_orders
+    }
+
+
+@app.post("/api/sandbox/simulate-stockout")
+async def sandbox_simulate_stockout():
+    """
+    1-Click Judge Demo Trigger:
+    Simulates inventory depletion to 2 units, triggering the inventory Sentinel warning.
+    """
+    conn = db()
+    prod = _fetchone(conn, "SELECT * FROM products ORDER BY stock ASC LIMIT 1", ())
+    if not prod:
+        conn.close()
+        raise HTTPException(400, "No products found")
+
+    new_stock = 2
+    _exec(conn, "UPDATE products SET stock=? WHERE id=?", (new_stock, prod["id"]))
+    conn.commit()
+    updated = _fetchone(conn, "SELECT * FROM products WHERE id=?", (prod["id"],))
+    conn.close()
+
+    await manager.broadcast_all({"type": "inventory_update", "product": updated})
+    await manager.send_user(prod["seller_id"], {
+        "type": "stockout_warning",
+        "product_id": prod["id"],
+        "product_name": prod["name"],
+        "stock": new_stock,
+        "message": f"🚨 Critical Inventory Warning: '{prod['name']}' stock dropped to {new_stock} units! Reorder recommended."
+    })
+
+    return {
+        "success": True,
+        "product": updated,
+        "alert": f"Stock depleted to {new_stock} units for '{prod['name']}'."
+    }
+
+
+@app.get("/api/ai/sentinel/logs")
+def get_sentinel_logs():
+    """Audit trail of autonomous AI Sentinel actions."""
+    conn = db()
+    rows = _fetchall(conn, "SELECT * FROM sentinel_logs ORDER BY created_at DESC LIMIT 50")
+    conn.close()
+    return rows
+
+
 # ---------------------------------------------------------------- PDF invoice
 
 @app.get("/api/orders/{order_id}/invoice")
@@ -1738,11 +2167,27 @@ class NewProduct(BaseModel):
     category: str = "General"
     icon: str = "📦"
     description: str = ""
+    images: Optional[List[str]] = []
+
+
+class UpdateProduct(BaseModel):
+    name: Optional[str] = None
+    price: Optional[float] = None
+    stock: Optional[int] = None
+    category: Optional[str] = None
+    icon: Optional[str] = None
+    description: Optional[str] = None
+    images: Optional[List[str]] = None
 
 
 class StockUpdate(BaseModel):
     stock: Optional[int] = None
     delta: Optional[int] = None
+
+
+class NewReview(BaseModel):
+    rating: int = 5
+    comment: str = ""
 
 
 @app.get("/api/products")
@@ -1752,7 +2197,20 @@ def list_products(seller_id: Optional[str] = None):
         rows = _fetchall(conn, "SELECT * FROM products WHERE seller_id=? ORDER BY name ASC", (seller_id,))
     else:
         rows = _fetchall(conn, "SELECT * FROM products ORDER BY name ASC")
+
+    stats = _fetchall(conn, "SELECT product_id, AVG(rating) as avg_rating, COUNT(*) as review_count FROM product_reviews GROUP BY product_id")
+    stats_map = {s["product_id"]: (round(float(s["avg_rating"]), 1), int(s["review_count"])) for s in stats}
     conn.close()
+
+    for r in rows:
+        try:
+            r["images"] = json.loads(r.get("images") or "[]")
+        except Exception:
+            r["images"] = []
+        avg_r, count_r = stats_map.get(r["id"], (5.0, 0))
+        r["avg_rating"] = avg_r
+        r["review_count"] = count_r
+
     return rows
 
 
@@ -1760,7 +2218,6 @@ def list_products(seller_id: Optional[str] = None):
 async def create_product(body: NewProduct, user=Depends(get_current_user)):
     if user["role"] != "seller":
         raise HTTPException(403, "Only sellers can add products")
-    # Ensure seller is verified
     conn = db()
     seller_row = _fetchone(conn, "SELECT status FROM users WHERE id=?", (user["sub"],))
     if seller_row and seller_row.get("status") != "active":
@@ -1772,18 +2229,83 @@ async def create_product(body: NewProduct, user=Depends(get_current_user)):
     if body.stock < 0:
         conn.close()
         raise HTTPException(400, "Stock cannot be negative")
+    if body.images and len(body.images) > 5:
+        conn.close()
+        raise HTTPException(400, "Maximum 5 images allowed per product")
 
     pid = str(uuid.uuid4())[:8].upper()
     seller_name = user.get("name") or "Verified Seller"
+    images_json = json.dumps((body.images or [])[:5])
+
     _exec(conn,
-        "INSERT INTO products (id, name, price, stock, category, seller_id, seller_name, icon, description) VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO products (id, name, price, stock, category, seller_id, seller_name, icon, description, images) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (pid, body.name.strip(), body.price, body.stock, body.category.strip(),
-         user["sub"], seller_name, body.icon.strip() or "📦", body.description.strip()))
+         user["sub"], seller_name, body.icon.strip() or "📦", body.description.strip(), images_json))
     conn.commit()
     product = _fetchone(conn, "SELECT * FROM products WHERE id=?", (pid,))
     conn.close()
+    try:
+        product["images"] = json.loads(product.get("images") or "[]")
+    except Exception:
+        product["images"] = []
+    product["avg_rating"] = 5.0
+    product["review_count"] = 0
+
     await manager.broadcast_all({"type": "product_added", "product": product})
     return product
+
+
+@app.put("/api/products/{product_id}")
+async def update_product(product_id: str, body: UpdateProduct, user=Depends(get_current_user)):
+    if user["role"] != "seller":
+        raise HTTPException(403, "Only sellers can update products")
+    conn = db()
+    row = _fetchone(conn, "SELECT * FROM products WHERE id=?", (product_id,))
+    if not row:
+        conn.close()
+        raise HTTPException(404, "Product not found")
+    if row["seller_id"] != user["sub"]:
+        conn.close()
+        raise HTTPException(403, "You can only update your own products")
+
+    if body.images is not None and len(body.images) > 5:
+        conn.close()
+        raise HTTPException(400, "Maximum 5 images allowed per product")
+
+    name = body.name.strip() if body.name is not None else row["name"]
+    price = body.price if body.price is not None else row["price"]
+    stock = max(0, body.stock) if body.stock is not None else row["stock"]
+    category = body.category.strip() if body.category is not None else row["category"]
+    icon = body.icon.strip() if body.icon is not None else row["icon"]
+    description = body.description.strip() if body.description is not None else row.get("description", "")
+    
+    if body.images is not None:
+        images_str = json.dumps(body.images[:5])
+    else:
+        images_str = row.get("images") or "[]"
+
+    _exec(conn,
+        """UPDATE products 
+           SET name=?, price=?, stock=?, category=?, icon=?, description=?, images=?
+           WHERE id=?""",
+        (name, price, stock, category, icon, description, images_str, product_id))
+    conn.commit()
+
+    updated = _fetchone(conn, "SELECT * FROM products WHERE id=?", (product_id,))
+    
+    # Get review stats
+    stats = _fetchone(conn, "SELECT AVG(rating) as avg_rating, COUNT(*) as review_count FROM product_reviews WHERE product_id=?", (product_id,))
+    conn.close()
+    
+    try:
+        updated["images"] = json.loads(updated.get("images") or "[]")
+    except Exception:
+        updated["images"] = []
+    updated["avg_rating"] = round(float(stats["avg_rating"]), 1) if stats and stats["avg_rating"] else 5.0
+    updated["review_count"] = int(stats["review_count"]) if stats and stats["review_count"] else 0
+
+    await manager.broadcast_all({"type": "inventory_update", "product": updated})
+    return updated
 
 
 @app.delete("/api/products/{product_id}")
@@ -1799,6 +2321,7 @@ async def delete_product(product_id: str, user=Depends(get_current_user)):
         conn.close()
         raise HTTPException(403, "You can only delete your own products")
     _exec(conn, "DELETE FROM products WHERE id=?", (product_id,))
+    _exec(conn, "DELETE FROM product_reviews WHERE product_id=?", (product_id,))
     conn.commit()
     conn.close()
     await manager.broadcast_all({"type": "product_deleted", "product_id": product_id})
@@ -1830,9 +2353,82 @@ async def update_product_stock(product_id: str, body: StockUpdate, user=Depends(
     _exec(conn, "UPDATE products SET stock=? WHERE id=?", (new_stock, product_id))
     conn.commit()
     updated = _fetchone(conn, "SELECT * FROM products WHERE id=?", (product_id,))
+    
+    stats = _fetchone(conn, "SELECT AVG(rating) as avg_rating, COUNT(*) as review_count FROM product_reviews WHERE product_id=?", (product_id,))
     conn.close()
+
+    try:
+        updated["images"] = json.loads(updated.get("images") or "[]")
+    except Exception:
+        updated["images"] = []
+    updated["avg_rating"] = round(float(stats["avg_rating"]), 1) if stats and stats["avg_rating"] else 5.0
+    updated["review_count"] = int(stats["review_count"]) if stats and stats["review_count"] else 0
+
     await manager.broadcast_all({"type": "inventory_update", "product": updated})
     return updated
+
+
+# ---------------------------------------------------------------- product feedback & reviews
+
+@app.get("/api/products/{product_id}/reviews")
+def get_product_reviews(product_id: str):
+    conn = db()
+    rows = _fetchall(conn, "SELECT * FROM product_reviews WHERE product_id=? ORDER BY created_at DESC", (product_id,))
+    conn.close()
+    if rows:
+        avg_rating = round(sum(r["rating"] for r in rows) / len(rows), 1)
+    else:
+        avg_rating = 5.0
+    return {
+        "reviews": rows,
+        "count": len(rows),
+        "average_rating": avg_rating
+    }
+
+
+@app.post("/api/products/{product_id}/reviews")
+async def create_product_review(product_id: str, body: NewReview, user=Depends(get_current_user)):
+    if user["role"] != "customer":
+        raise HTTPException(403, "Only customers can submit reviews")
+    if body.rating < 1 or body.rating > 5:
+        raise HTTPException(400, "Rating must be between 1 and 5 stars")
+    if not body.comment or not body.comment.strip():
+        raise HTTPException(400, "Please provide review feedback text")
+
+    conn = db()
+    prod = _fetchone(conn, "SELECT * FROM products WHERE id=?", (product_id,))
+    if not prod:
+        conn.close()
+        raise HTTPException(404, "Product not found")
+
+    rid = str(uuid.uuid4())[:8].upper()
+    now = datetime.utcnow().isoformat()
+    _exec(conn,
+        """INSERT INTO product_reviews (id, product_id, customer_id, customer_name, rating, comment, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (rid, product_id, user["sub"], user["name"], body.rating, body.comment.strip(), now))
+    conn.commit()
+
+    all_revs = _fetchall(conn, "SELECT rating FROM product_reviews WHERE product_id=?", (product_id,))
+    avg_r = round(sum(r["rating"] for r in all_revs) / len(all_revs), 1)
+    conn.close()
+
+    review_obj = {
+        "id": rid, "product_id": product_id, "customer_id": user["sub"],
+        "customer_name": user["name"], "rating": body.rating,
+        "comment": body.comment.strip(), "created_at": now
+    }
+
+    # Notify seller
+    await manager.send_user(prod["seller_id"], {
+        "type": "new_product_review",
+        "product_id": product_id,
+        "product_name": prod["name"],
+        "rating": body.rating,
+        "review": review_obj
+    })
+
+    return {"success": True, "review": review_obj, "average_rating": avg_r, "total_reviews": len(all_revs)}
 
 
 # ---------------------------------------------------------------- orders (unchanged logic, admin can see all)
@@ -2082,6 +2678,13 @@ async def delay_order(order_id: str, body: DelayOrderBody, user=Depends(get_curr
     updated["items"] = json.loads(updated["items"])
     await manager.send_user(updated["customer_id"], {"type": "status_update", "order": updated})
     await manager.send_user(updated["seller_id"], {"type": "status_update", "order": updated})
+
+    # Trigger Autonomous AI Sentinel for proactive customer compensation
+    try:
+        await trigger_sentinel_for_delay(order_id, body.reason.strip() or "Logistics delay", body.delay_minutes)
+    except Exception as e:
+        print(f"[Sentinel] Error in delay hook: {e}")
+
     return updated
 
 

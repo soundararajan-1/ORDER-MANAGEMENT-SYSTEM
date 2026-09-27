@@ -1,10 +1,27 @@
-# OrderFlow AI v2.0 — Real-Time Multi-Seller Operations, Admin Governance & Marketplace
+# OrderFlow AI — Real-Time Multi-Seller Operations, Autonomous AI Sentinel & Marketplace
 
-> **A Flipkart-Grade Real-Time Order Management System** featuring **VisionOS Neon-Glassmorphism UI**, **Admin Governance & Multi-Admin Approval Chains**, **Seller KYC Verification**, **Smart Apology-First Support Chat**, **Gemini 2.0 Flash AI Insights**, **GST PDF Tax Invoices**, **PWA Offline Support**, **Dark/Light Theme Switching**, **bcrypt Security**, and **Dual SQLite/PostgreSQL Engine**.
+> **A Flipkart-Grade Real-Time Order Management System** featuring **Autonomous AI Supply Chain Sentinel Agent**, **1-Click Judge Chaos Operations Sandbox**, **VisionOS Neon-Glassmorphism UI**, **Admin Governance & Multi-Admin Approval Chains**, **Seller KYC Verification**, **Smart Apology-First Support Chat**, **Gemini 2.0 Flash AI Insights**, **GST PDF Tax Invoices**, **PWA Offline Support**, **Dark/Light Theme Switching**, **bcrypt Security**, and **Dual SQLite/PostgreSQL Engine**.
 
 ---
 
-## 🌟 What's New in v2.0
+## 🌟 Autonomous AI Sentinel & 1-Click Operations Sandbox (Judge Magnet)
+
+### 🤖 1. Autonomous AI Supply Chain Sentinel Agent
+- **Proactive Delay Detection & Auto-Resolution**: When an order encounters transit weather disruptions, cargo highway congestion, or sorting facility jams, the Sentinel Agent autonomously intervenes.
+- **Dynamic Apology Coupon Provisioning**: Calculates delay severity and automatically generates a genuine, single-use compensation voucher (e.g. `SENTINEL-ORD1-XXXX` for flat ₹50–₹100 OFF) directly inserted into the database.
+- **Empathetic AI Apology & Retention**: Synthesizes a personalized apology directly to the customer's chat and push notification, safeguarding seller NPS and preventing order cancellation churn.
+- **Admin Governance Audit Trail**: Every autonomous intervention is recorded in `sentinel_logs` with severity, delay reason, courtesy voucher, and AI decision trace accessible via the new **🤖 AI Sentinel Tab** in the Admin Dashboard.
+
+### ⚡ 2. Live Demo Simulator (Judge Chaos Sandbox)
+A floating VisionOS widget accessible at all times with 1-click live presentation triggers:
+- 🔴 **Simulate Courier Delay**: Injects a live transit delay, triggering the AI Sentinel's real-time apology modal and auto-coupon generation.
+- 🚀 **Simulate Flash Sale Rush**: Injects 5 simulated multi-city concurrent orders across sellers with live GMV recalculation, inventory decrementing, and real-time confetti/sound celebrations.
+- 📦 **Simulate Low Stock Alert**: Depletes inventory to 2 units, triggering an automated Gemini restock alert.
+- 📋 **View Sentinel Audit Log**: Instant modal view of historical autonomous interventions and courtesy discounts.
+
+---
+
+## 🌟 Core Architecture & Governance
 
 ### 1. 🛡️ Admin Governance & Strict Approval Chain
 - **Zero Default Admin**: No hardcoded admin credentials exist in code.
@@ -51,6 +68,28 @@ New sellers must provide full KYC onboarding information before they can list pr
 - **Forgot Password Recovery**: Secure self-service recovery directly from the login screen verifying registered **Birth Place** or **Favorite Person** security answers (with case-insensitive matching).
 - **Show/Hide Password Visibility Toggles**: Interactive eye toggles (`👁️`) available across all sign-in, registration, reset, and password modification forms.
 - **Admin User ID Removal**: Administrators can permanently delete user IDs for Customers, Sellers, or Junior Admins with immediate session revocation. The Master Founder Admin (`956673`) is immutably protected from deletion or suspension.
+
+### 7. 🛡️ Autonomous AI Delay Sentinel & 1-Click Operations Sandbox
+- **Autonomous Delay Sentinel**: When logistics disruptions or courier delays occur, the AI Sentinel automatically assesses delay severity (Minor, Moderate, Critical), composes an empathetic customer apology, dynamically generates a courtesy compensation voucher (`SENTINEL-XXXX`), and broadcasts notifications across live WebSockets.
+- **Floating 1-Click Operations Sandbox (Judge Demo Tool)**: Floating VisionOS dock widget in the bottom-right corner allowing 1-click simulation of:
+  - ⏱️ **Simulate Delay (+35m)**: Triggers live AI Sentinel intervention with auto-voucher creation and customer order chat notification.
+  - ⚡ **Flash Sale Surge (+5 Orders)**: Instantly generates concurrent incoming orders and boosts GMV.
+  - 🚨 **Low Stock Chaos (<3 units)**: Instantly triggers low-stock warnings and AI predictive restock recommendations.
+- **Admin Sentinel Audit Tab (Tab 8)**: Full observability ledger with severity badges, auto-generated coupon codes, apology transcripts, and AI analysis rationale.
+
+### 8. 📸 Product Multi-Image Support (Max 5) & 💬 Customer Feedback/Reviews
+- **Multi-Image Catalog (Strict Max 5 Photos)**:
+  - Sellers can upload up to 5 photos per product using local file selection (PNG/JPG/WEBP converted to Base64) or direct image URLs.
+  - 1st photo is automatically designated as the primary cover photo across shop cards and inventory tables.
+  - Visual preview strip with remove buttons (`✕`), cover indicator (`★ Cover`), and limit counter (`X / 5`).
+  - Strict enforcement on both frontend and backend (rejects any attempt to exceed 5 images with HTTP 400).
+  - Existing products can be updated anytime with new/replaced photos via the `✏️ Edit & Photos` inventory action.
+- **Customer Feedback & Rating Section**:
+  - Every product features a dedicated feedback and rating section accessible via product cards or details modal.
+  - Customers can submit 1–5 star ratings with detailed written feedback.
+  - Interactive star rating picker with responsive hover labels (*1 Star - Terrible* to *5 Stars - Excellent*).
+  - Real-time recalculation of product average rating (`avg_rating`) and total review count (`review_count`).
+  - Multi-image gallery carousel with thumbnail switcher and photo counter inside the product details modal.
 
 ---
 

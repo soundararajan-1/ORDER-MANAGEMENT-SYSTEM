@@ -30,6 +30,14 @@
 - Interactive **Daily Revenue Volume Chart** showing day-by-day sales velocity.
 - Top customer repeat-buyer insights.
 
+### 5. 🛡️ Autonomous AI Delay Sentinel & 1-Click Operations Sandbox
+- **Autonomous Delay Sentinel**: When logistics disruptions or courier delays occur, the AI Sentinel automatically assesses delay severity (Minor, Moderate, Critical), composes an empathetic customer apology, dynamically generates a courtesy compensation voucher (`SENTINEL-XXXX`), and broadcasts notifications across live WebSockets.
+- **Floating 1-Click Operations Sandbox (Judge Demo Tool)**: Floating VisionOS dock widget in the bottom-right corner allowing 1-click simulation of delay interventions, flash sales, and low stock warnings.
+
+### 6. 📸 Product Multi-Image Support (Max 5) & 💬 Customer Feedback/Reviews
+- **Multi-Image Catalog (Strict Max 5 Photos)**: Sellers can upload and update up to 5 photos per product using device file upload or image URLs with a visual preview strip, cover badge, and strict backend/frontend enforcement.
+- **Customer Feedback & Rating Section**: Customers can view a multi-image gallery carousel, read reviews, and post 1–5 star ratings with feedback, recalculating average ratings in real time.
+
 ---
 
 ## 🔑 Pre-Configured Test Accounts
