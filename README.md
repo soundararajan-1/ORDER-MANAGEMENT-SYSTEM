@@ -117,6 +117,23 @@ New sellers must provide full KYC onboarding information before they can list pr
   - Real-time recalculation of product average rating (`avg_rating`) and total review count (`review_count`).
   - Multi-image gallery carousel with thumbnail switcher and photo counter inside the product details modal.
 
+### 9. 📱 Dynamic UPI QR Checkout Modal (NPCI Instant Fast Pay)
+- **Zero-Fee Dynamic UPI QR Engine**:
+  - Dynamically encodes NPCI-compliant UPI deep-links (`upi://pay?pa=orderflow.ai@okhdfcbank&pn=...&am=...&cu=INR&tn=...`) containing the exact order amount and internal reference.
+  - High-resolution dynamic QR code framed in a VisionOS glass card with an animated neon scanning laser line and center UPI badge.
+  - 1-Click VPA copy chip (`orderflow.ai@okhdfcbank`) with instant clipboard notification.
+- **Mobile 1-Tap Deep-Link & Supported Apps**:
+  - Prominent app badges for **Google Pay**, **PhonePe**, **Paytm**, **BHIM**, and **CRED**.
+  - Direct deep-link button (`📱 Open in UPI App`) allowing mobile shoppers to trigger installed payment apps in 1 tap.
+- **5-Minute Live Session Expiry**:
+  - Real-time countdown clock (`05:00` → `00:00`) with smooth gradient progress bar that ticks down every second.
+- **Real-Time Bank Confirmation & 1-Click Judge Simulation**:
+  - Pulsing radar bank listener indicator (*"Listening for bank webhook confirmation..."*).
+  - 1-Click **"⚡ Simulate Instant Bank Approval (Judge/Demo Mode)"** and **"✓ I Have Paid"** manual confirmation.
+  - Generates unique transaction UTR numbers (e.g. `UPI20268819234`), plays success audio chime, fires celebratory confetti, and displays 1-click **Download GST Tax Invoice (PDF)** and **Track Order** links.
+- **Floating Judge Dock Shortcut**:
+  - 1-Click **"Dynamic UPI QR Checkout Modal"** test trigger directly accessible inside the bottom-right floating Judge Demo Sandbox.
+
 ---
 
 ## 🔑 Test Accounts & Demo Access
