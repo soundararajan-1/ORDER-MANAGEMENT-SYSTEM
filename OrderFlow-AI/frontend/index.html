@@ -1256,6 +1256,12 @@ function openSellerKycModal(){
               <textarea id="kycBrandDesc" rows="2" placeholder="Briefly describe what your brand crafts, manufactures or sells..." class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"></textarea>
             </div>
 
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Seller UPI ID (VPA) for Customer Direct Payments</label>
+              <input id="kycUpiId" type="text" placeholder="e.g. yourstore@okaxis or 9876543210@upi" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400 font-mono text-cyan-300" />
+              <p class="text-[10px] text-white/40 mt-1">When customers buy your products via Dynamic UPI QR, payments go directly to this bank VPA.</p>
+            </div>
+
             <div class="pt-3 flex justify-end">
               <button type="button" id="btnToStep2" class="btn-neon text-xs font-bold px-5 py-2.5 cursor-pointer">Next: Logistics Details →</button>
             </div>
@@ -1446,6 +1452,7 @@ function openSellerKycModal(){
     const shipping_mode = document.querySelector('input[name="shippingMode"]:checked')?.value || "marketplace";
     const order_acceptance = document.querySelector('input[name="orderAccept"]:checked')?.value || "auto";
     const rto_mode = document.querySelector('input[name="rtoMode"]:checked')?.value || "seller_return";
+    const upi_id = document.getElementById("kycUpiId")?.value.trim() || "";
     const email = document.getElementById("kycEmail").value.trim();
     const password = document.getElementById("kycPassword").value;
     const birth_place = document.getElementById("kycBirthPlace")?.value?.trim() || "";
@@ -1460,6 +1467,7 @@ function openSellerKycModal(){
           brand_description, product_category,
           shipping_mode, stock_address,
           order_acceptance, rto_mode,
+          upi_id,
           birth_place, fav_person
         })
       });
@@ -1959,6 +1967,20 @@ function openCart(){
 
   const finalPayable = Math.max(0, rawSubtotal - discountAmount);
   const sellersInCart = Array.from(new Set(state.cart.map(i=>i.seller_name || 'Verified Seller')));
+  const cartSellerIds = Array.from(new Set(state.cart.map(i=>{
+    const p = state.products.find(x => x.id === i.product_id);
+    return p ? p.seller_id : null;
+  }).filter(Boolean)));
+  const primarySellerId = cartSellerIds.length === 1 ? cartSellerIds[0] : "";
+  const primaryProduct = state.cart.length > 0 ? state.products.find(x => x.id === state.cart[0].product_id) : null;
+  const cartSellerUpiId = (primarySellerId && primaryProduct && primaryProduct.seller_upi_id)
+    ? primaryProduct.seller_upi_id.trim()
+    : "orderflow.ai@okhdfcbank";
+  const cartSellerDisplayName = (primarySellerId && primaryProduct && (primaryProduct.seller_name || primaryProduct.brand_name))
+    ? (primaryProduct.seller_name || primaryProduct.brand_name)
+    : (sellersInCart[0] || "OrderFlow Marketplace");
+  const cleanCartSellerName = cartSellerDisplayName.replace(/[^a-zA-Z0-9 ]/g, '').trim().replace(/\s+/g, '+') || "OrderFlow+AI";
+  const cartUpiLink = `upi://pay?pa=${encodeURIComponent(cartSellerUpiId)}&pn=${cleanCartSellerName}&am=${finalPayable.toFixed(2)}&cu=INR&tn=OrderFlow_Cart`;
 
   drawer.innerHTML = `
     <div class="glass glow-border h-full p-5 sm:p-6 flex flex-col pop-in bg-[#070b22]/98 border-cyan-400/40 overflow-hidden">
@@ -2068,12 +2090,14 @@ function openCart(){
                   <span class="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
                     <span>⚡ Dynamic UPI Instant Pay</span>
                   </span>
-                  <span class="text-[9px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-400/40">NPCI Certified</span>
+                  <span class="text-[9px] ${primarySellerId && primaryProduct?.seller_upi_id ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/40' : 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'} font-semibold px-2 py-0.5 rounded-full border">
+                    ${primarySellerId && primaryProduct?.seller_upi_id ? 'Direct to Seller Bank' : 'NPCI Certified'}
+                  </span>
                 </div>
 
                 <div class="relative inline-block p-2 rounded-2xl bg-white text-slate-900 shadow-[0_0_20px_rgba(0,229,255,0.3)] border-2 border-cyan-400/70 overflow-hidden">
                   <div class="qr-laser"></div>
-                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=upi%3A%2F%2Fpay%3Fpa%3Dorderflow.ai%40okhdfcbank%26pn%3DOrderFlow%2BAI%26am%3D${finalPayable.toFixed(2)}%26cu%3DINR&margin=1" alt="Dynamic UPI QR" class="w-24 h-24 sm:w-28 sm:h-28 block pointer-events-none select-none" />
+                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(cartUpiLink)}&margin=1" alt="Dynamic UPI QR" class="w-24 h-24 sm:w-28 sm:h-28 block pointer-events-none select-none" />
                   <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
                     <div class="w-6 h-6 rounded bg-slate-900 border border-cyan-400 flex items-center justify-center">
                       <span class="text-[8px] font-black text-cyan-300">UPI</span>
@@ -2089,10 +2113,16 @@ function openCart(){
                   <span class="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 font-medium">CRED</span>
                 </div>
 
-                <div class="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-black/40 border border-white/10 text-[11px]">
-                  <span class="text-white/50 text-[10px]">VPA:</span>
-                  <span class="font-mono text-cyan-300 font-semibold text-[10px]">orderflow.ai@okhdfcbank</span>
-                  <button type="button" onclick="navigator.clipboard.writeText('orderflow.ai@okhdfcbank'); toast('UPI ID copied!', 'success');" class="text-[10px] text-cyan-400 hover:text-cyan-200 underline cursor-pointer">Copy</button>
+                <div class="p-2.5 rounded-xl bg-black/40 border border-white/10 text-left space-y-1">
+                  <div class="flex items-center justify-between text-[11px]">
+                    <span class="text-white/50 text-[10px]">Beneficiary:</span>
+                    <span class="font-semibold text-white truncate max-w-[170px] text-[10px]">${cartSellerDisplayName}</span>
+                  </div>
+                  <div class="flex items-center justify-between text-[11px]">
+                    <span class="text-white/50 text-[10px]">UPI VPA:</span>
+                    <span class="font-mono text-cyan-300 font-semibold text-[10px] truncate max-w-[150px]">${cartSellerUpiId}</span>
+                    <button type="button" onclick="navigator.clipboard.writeText('${cartSellerUpiId}'); toast('Seller UPI ID copied!', 'success');" class="text-[10px] text-cyan-400 hover:text-cyan-200 underline cursor-pointer">Copy</button>
+                  </div>
                 </div>
               </div>
             ` : state.selectedPaymentMethod === 'Card' ? `
@@ -2240,14 +2270,26 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
     return p ? (p.seller_name || "OrderFlow Verified Store") : "OrderFlow Verified Store";
   }))].join(", ") || "OrderFlow Verified Store";
 
-  const vpa = "orderflow.ai@okhdfcbank";
-  const cleanMerchant = sellerNames.replace(/[^a-zA-Z0-9 ]/g, '').trim().replace(/\s+/g, '+') || "OrderFlow+AI";
-  const upiDeepLink = `upi://pay?pa=${vpa}&pn=${cleanMerchant}&am=${finalPayable.toFixed(2)}&cu=INR&tn=OrderFlow_${orderRef}`;
+  const cartSellerIds = [...new Set(state.cart.map(i=>{
+    const p = state.products.find(x=>x.id===i.product_id);
+    return p ? p.seller_id : null;
+  }).filter(Boolean))];
+  const primarySellerId = cartSellerIds.length === 1 ? cartSellerIds[0] : "";
+  const primaryProduct = state.cart.length > 0 ? state.products.find(x=>x.id===state.cart[0].product_id) : null;
+  const initialVpa = (primarySellerId && primaryProduct && primaryProduct.seller_upi_id) 
+    ? primaryProduct.seller_upi_id.trim() 
+    : "orderflow.ai@okhdfcbank";
+  const merchantDisplayName = (primarySellerId && primaryProduct && (primaryProduct.seller_name || primaryProduct.brand_name))
+    ? (primaryProduct.seller_name || primaryProduct.brand_name)
+    : sellerNames;
+  const cleanMerchant = merchantDisplayName.replace(/[^a-zA-Z0-9 ]/g, '').trim().replace(/\s+/g, '+') || "OrderFlow+AI";
+  const upiDeepLink = `upi://pay?pa=${encodeURIComponent(initialVpa)}&pn=${cleanMerchant}&am=${finalPayable.toFixed(2)}&cu=INR&tn=OrderFlow_${orderRef}&tr=${orderRef}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(upiDeepLink)}&margin=1`;
 
   let intentData = {
-    upi_id: vpa,
-    merchant_name: sellerNames,
+    upi_id: initialVpa,
+    merchant_name: merchantDisplayName,
+    is_direct_seller: Boolean(primarySellerId && primaryProduct && primaryProduct.seller_upi_id),
     amount: finalPayable,
     order_ref: orderRef,
     upi_string: upiDeepLink,
@@ -2261,7 +2303,8 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
       body: JSON.stringify({
         amount: finalPayable,
         order_ref: orderRef,
-        seller_name: sellerNames
+        seller_name: merchantDisplayName,
+        seller_id: primarySellerId
       })
     });
     if(res && res.qr_url) intentData = res;
@@ -2361,6 +2404,25 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
                   <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span> Zero Processing Fee
                 </p>
                 <p class="text-[10px] text-white/40">${state.cart.reduce((s,i)=>s+i.qty,0)} Items · Standard Delivery</p>
+              </div>
+            </div>
+
+            <!-- Beneficiary Store & Bank VPA -->
+            <div class="p-3 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between text-xs">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-sm">
+                  🏪
+                </div>
+                <div>
+                  <p class="text-[10px] text-white/40 uppercase tracking-wider font-semibold">Beneficiary Payee</p>
+                  <p class="font-bold text-white text-xs">${intentData.merchant_name || 'Verified Merchant'}</p>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="text-[9px] ${intentData.is_direct_seller ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/40' : 'bg-purple-500/20 text-purple-300 border border-purple-400/40'} font-semibold px-2 py-0.5 rounded-full inline-block">
+                  ${intentData.is_direct_seller ? '✓ Direct to Seller Bank' : 'Platform Escrow'}
+                </span>
+                <p class="text-[10px] font-mono text-cyan-300 mt-0.5 truncate max-w-[150px]">${intentData.upi_id}</p>
               </div>
             </div>
 
@@ -4899,6 +4961,12 @@ async function renderSellerBranding(){
           <textarea id="brandDescInput" rows="2" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400">${profile.brand_description || ''}</textarea>
         </div>
 
+        <div>
+          <label class="block text-xs font-semibold text-white/80 mb-1">Seller UPI ID (VPA) for Direct Bank Payouts</label>
+          <input type="text" id="brandUpiInput" value="${profile.upi_id || ''}" placeholder="e.g. yourbrand@okhdfcbank or 9876543210@upi" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-400" />
+          <p class="text-[10px] text-white/40 mt-1">Real-time Dynamic UPI QR codes at checkout will route payments with the exact bill amount directly to this bank account.</p>
+        </div>
+
         <button type="submit" class="btn-neon font-bold text-xs px-6 py-3 cursor-pointer">
           💾 Save & Publish Branding Changes
         </button>
@@ -4919,14 +4987,15 @@ async function renderSellerBranding(){
     const store_logo = document.getElementById("brandLogoUrl").value.trim();
     const store_banner = document.getElementById("brandBannerUrl").value.trim();
     const brand_description = document.getElementById("brandDescInput").value.trim();
+    const upi_id = document.getElementById("brandUpiInput")?.value.trim() || "";
 
     try {
       const updated = await api("/api/sellers/branding", {
         method: "PATCH",
-        body: JSON.stringify({ brand_color, brand_name, store_logo, store_banner, brand_description })
+        body: JSON.stringify({ brand_color, brand_name, store_logo, store_banner, brand_description, upi_id })
       });
       state.user = { ...state.user, ...updated };
-      toast("Store branding updated successfully!", "success");
+      toast("Store branding and UPI details updated successfully!", "success");
       renderSellerBranding();
     } catch(err){
       toast("Failed to update branding: " + err.message, "error");
@@ -5668,6 +5737,7 @@ async function renderAdminSellers(){
                   <p class="text-white/80">📱 Phone: <span class="font-mono text-cyan-300">${s.phone || 'N/A'}</span></p>
                   <p class="text-white/80">✉️ Email: <span class="text-white/60">${s.email}</span></p>
                   <p class="text-white/80">🏷️ Category: <span class="text-purple-300">${s.product_category || 'General'}</span></p>
+                  <p class="text-white/80">💳 UPI ID: <span class="font-mono text-cyan-300 font-bold">${s.upi_id || 'Not set'}</span></p>
                 </div>
 
                 <div class="p-3 rounded-xl bg-white/5 border border-white/5">

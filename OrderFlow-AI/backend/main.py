@@ -169,6 +169,7 @@ def init_db():
             store_logo TEXT DEFAULT '',
             store_banner TEXT DEFAULT '',
             brand_color TEXT DEFAULT '#6c63ff',
+            upi_id TEXT DEFAULT '',
             rejection_reason TEXT DEFAULT '',
             verified_at TEXT DEFAULT '',
             created_at TEXT DEFAULT '',
@@ -336,6 +337,7 @@ def init_db():
             ("store_logo", "TEXT DEFAULT ''"),
             ("store_banner", "TEXT DEFAULT ''"),
             ("brand_color", "TEXT DEFAULT '#6c63ff'"),
+            ("upi_id", "TEXT DEFAULT ''"),
             ("rejection_reason", "TEXT DEFAULT ''"),
             ("verified_at", "TEXT DEFAULT ''"),
             ("birth_place", "TEXT DEFAULT ''"),
@@ -351,6 +353,14 @@ def init_db():
             _exec(conn, "UPDATE users SET birth_place='Chennai', fav_person='Soundar' WHERE (birth_place='' OR birth_place IS NULL) AND (id='956673' OR is_first_admin=1)")
             _exec(conn, "UPDATE users SET birth_place='Bangalore', fav_person='Tech' WHERE (birth_place='' OR birth_place IS NULL) AND role='seller'")
             _exec(conn, "UPDATE users SET birth_place='Mumbai', fav_person='Kalam' WHERE (birth_place='' OR birth_place IS NULL) AND role='customer'")
+            # Seed default seller UPI IDs
+            default_seller_upis = {
+                "1001001": "technova.store@okhdfcbank",
+                "1002002": "aurahome@icici",
+                "1003003": "titaniumfitness@paytm"
+            }
+            for sid, supi in default_seller_upis.items():
+                _exec(conn, "UPDATE users SET upi_id=? WHERE id=? AND (upi_id IS NULL OR upi_id='')", (supi, sid))
         except Exception:
             pass
 
@@ -363,6 +373,7 @@ def init_db():
         for col, defn in [
             ("razorpay_order_id", "TEXT DEFAULT ''"),
             ("razorpay_payment_id", "TEXT DEFAULT ''"),
+            ("upi_id", "TEXT DEFAULT ''"),
         ]:
             try:
                 _exec(conn, f"ALTER TABLE orders ADD COLUMN {col} {defn}")
@@ -919,6 +930,7 @@ class RegisterBody(BaseModel):
     stock_address: Optional[str] = ""
     order_acceptance: Optional[str] = "auto"
     rto_mode: Optional[str] = "marketplace"
+    upi_id: Optional[str] = ""
     # Security recovery fields
     birth_place: Optional[str] = ""
     fav_person: Optional[str] = ""
@@ -959,8 +971,8 @@ async def register(body: RegisterBody):
         """INSERT INTO users (id, name, email, password_hash, role, picture, status,
                               brand_name, phone, state, brand_description, product_category,
                               shipping_mode, stock_address, order_acceptance, rto_mode,
-                              birth_place, fav_person, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                              upi_id, birth_place, fav_person, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (new_id, body.name.strip(), email, pw_hash, role, pic, status,
          (body.brand_name or "").strip(),
          (body.phone or "").strip(),
@@ -971,6 +983,7 @@ async def register(body: RegisterBody):
          (body.stock_address or "").strip(),
          body.order_acceptance or "auto",
          body.rto_mode or "marketplace",
+         (body.upi_id or "").strip(),
          (body.birth_place or "").strip(),
          (body.fav_person or "").strip(),
          now))
@@ -2147,21 +2160,36 @@ class UpiIntentBody(BaseModel):
     amount: float
     order_ref: Optional[str] = ""
     seller_name: Optional[str] = "OrderFlow Marketplace"
+    seller_id: Optional[str] = ""
 
 
 @app.post("/api/payments/upi/intent")
 def generate_upi_intent(body: UpiIntentBody, user=Depends(get_current_user)):
     vpa = "orderflow.ai@okhdfcbank"
+    merchant_name = body.seller_name or "OrderFlow Marketplace"
+    is_direct_seller = False
+
+    if body.seller_id and body.seller_id.strip():
+        conn = db()
+        seller = _fetchone(conn, "SELECT id, name, brand_name, upi_id FROM users WHERE id=? AND role='seller'", (body.seller_id.strip(),))
+        conn.close()
+        if seller and seller.get("upi_id") and seller["upi_id"].strip():
+            vpa = seller["upi_id"].strip()
+            merchant_name = (seller.get("brand_name") or seller.get("name") or merchant_name).strip()
+            is_direct_seller = True
+
     ref = body.order_ref or f"ORD{uuid.uuid4().hex[:8].upper()}"
-    clean_merchant = re.sub(r'[^a-zA-Z0-9 ]', '', body.seller_name or "OrderFlow AI").strip().replace(' ', '+')
+    clean_merchant = re.sub(r'[^a-zA-Z0-9 ]', '', merchant_name).strip().replace(' ', '+')
     if not clean_merchant:
         clean_merchant = "OrderFlow+AI"
-    upi_string = f"upi://pay?pa={vpa}&pn={clean_merchant}&am={body.amount:.2f}&cu=INR&tn=OrderFlow_{ref}"
+    # NPCI Standard UPI specification with exact amount, payee VPA, payee name and transaction ref
+    upi_string = f"upi://pay?pa={vpa}&pn={clean_merchant}&am={body.amount:.2f}&cu=INR&tn=OrderFlow_{ref}&tr={ref}"
     qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(upi_string)}&margin=1"
 
     return {
         "upi_id": vpa,
-        "merchant_name": body.seller_name or "OrderFlow Marketplace",
+        "merchant_name": merchant_name,
+        "is_direct_seller": is_direct_seller,
         "amount": round(body.amount, 2),
         "currency": "INR",
         "order_ref": ref,
@@ -2259,9 +2287,20 @@ class NewReview(BaseModel):
 def list_products(seller_id: Optional[str] = None):
     conn = db()
     if seller_id and seller_id != "all":
-        rows = _fetchall(conn, "SELECT * FROM products WHERE seller_id=? ORDER BY name ASC", (seller_id,))
+        rows = _fetchall(conn, """
+            SELECT p.*, u.upi_id as seller_upi_id 
+            FROM products p 
+            LEFT JOIN users u ON p.seller_id = u.id 
+            WHERE p.seller_id=? 
+            ORDER BY p.name ASC
+        """, (seller_id,))
     else:
-        rows = _fetchall(conn, "SELECT * FROM products ORDER BY name ASC")
+        rows = _fetchall(conn, """
+            SELECT p.*, u.upi_id as seller_upi_id 
+            FROM products p 
+            LEFT JOIN users u ON p.seller_id = u.id 
+            ORDER BY p.name ASC
+        """)
 
     stats = _fetchall(conn, "SELECT product_id, AVG(rating) as avg_rating, COUNT(*) as review_count FROM product_reviews GROUP BY product_id")
     stats_map = {s["product_id"]: (round(float(s["avg_rating"]), 1), int(s["review_count"])) for s in stats}
@@ -2573,6 +2612,8 @@ async def create_order(body: NewOrder, user=Depends(get_current_user)):
                 updated_products.append(p_row)
 
         serialized_items = [item.dict() for item, _ in s_items]
+        seller_row = _fetchone(conn, "SELECT upi_id FROM users WHERE id=?", (sid,))
+        s_upi = (seller_row.get("upi_id") or "").strip() if seller_row else ""
         order = {
             "id": order_id, "customer_id": user["sub"], "customer_name": user["name"],
             "seller_id": sid, "seller_name": s_name, "items": serialized_items,
@@ -2580,17 +2621,17 @@ async def create_order(body: NewOrder, user=Depends(get_current_user)):
             "payment_method": p_method, "payment_status": p_status,
             "razorpay_payment_id": (body.utr_number or "").strip(),
             "coupon_code": c_code if s_discount > 0 else "", "discount_amount": s_discount,
-            "shipping_address": s_addr, "created_at": now, "updated_at": now,
+            "shipping_address": s_addr, "upi_id": s_upi, "created_at": now, "updated_at": now,
         }
 
         _exec(conn,
             """INSERT INTO orders (id, customer_id, customer_name, seller_id, seller_name, items, amount,
                status, eta, delay_reason, payment_method, payment_status, razorpay_payment_id, coupon_code,
-               discount_amount, shipping_address, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               discount_amount, shipping_address, upi_id, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (order_id, user["sub"], user["name"], sid, s_name, json.dumps(serialized_items),
              order_amount, "Placed", eta, "", p_method, p_status, (body.utr_number or "").strip(),
-             c_code if s_discount > 0 else "", s_discount, s_addr, now, now))
+             c_code if s_discount > 0 else "", s_discount, s_addr, s_upi, now, now))
         created_orders.append(order)
         await manager.send_user(sid, {"type": "new_order", "order": order})
 
@@ -3066,6 +3107,7 @@ class SellerBrandingBody(BaseModel):
     store_banner: Optional[str] = None
     brand_name: Optional[str] = None
     brand_description: Optional[str] = None
+    upi_id: Optional[str] = None
 
 
 @app.patch("/api/sellers/branding")
@@ -3090,6 +3132,9 @@ def update_seller_branding(body: SellerBrandingBody, user=Depends(get_current_us
     if body.brand_description:
         updates.append("brand_description=?")
         params.append(body.brand_description.strip())
+    if body.upi_id is not None:
+        updates.append("upi_id=?")
+        params.append(body.upi_id.strip())
 
     if updates:
         params.append(user["sub"])
