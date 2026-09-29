@@ -1,6 +1,32 @@
+<div align="center">
+
 # OrderFlow AI — Real-Time Multi-Seller Operations, Autonomous AI Sentinel & Marketplace
 
+[![Live Hosted Demo](https://img.shields.io/badge/🚀_LIVE_HOSTED_DEMO-orderflow--ai.onrender.com-00C781?style=for-the-badge&logo=render&logoColor=white)](https://orderflow-ai.onrender.com)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/soundararajan-1/ORDER-MANAGEMENT-SYSTEM)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/new?template=https://github.com/soundararajan-1/ORDER-MANAGEMENT-SYSTEM)
+
+[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Google Gemini 2.0 Flash](https://img.shields.io/badge/Google_Gemini-2.0_Flash-8E75C4?style=flat-square&logo=google&logoColor=white)](https://ai.google.dev)
+[![Docker Ready](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com)
+[![Dual Database](https://img.shields.io/badge/Database-SQLite_%7C_PostgreSQL-336791?style=flat-square&logo=postgresql&logoColor=white)](#)
+[![PWA Ready](https://img.shields.io/badge/PWA-Installable-5A0FC8?style=flat-square&logo=pwa&logoColor=white)](#)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](#)
+
 > **A Flipkart-Grade Real-Time Order Management System** featuring **Autonomous AI Supply Chain Sentinel Agent**, **1-Click Judge Chaos Operations Sandbox**, **VisionOS Neon-Glassmorphism UI**, **Admin Governance & Multi-Admin Approval Chains**, **Seller KYC Verification**, **Smart Apology-First Support Chat**, **Gemini 2.0 Flash AI Insights**, **GST PDF Tax Invoices**, **PWA Offline Support**, **Dark/Light Theme Switching**, **bcrypt Security**, and **Dual SQLite/PostgreSQL Engine**.
+
+</div>
+
+---
+
+> ### 🌐 [⚡ Click Here to Launch the Live Interactive Demo](https://orderflow-ai.onrender.com)
+>
+> **Instant Demo Access**: The cloud demo is pre-seeded with multi-seller products, active orders, and real-time tracking simulations:
+> - 🛡️ **Founder Admin**: ID `956673` · Password `Soundar@52122` *(Full governance, seller KYC approvals, chaos ledger)*
+> - 🏪 **Verified Seller**: ID `1001001` · Password `seller123` *(TechNova Electronics, inventory, orders, AI descriptions)*
+> - 🛍️ **Customer**: ID `7001001` · Password `customer123` *(Shop, cart, live tracking, smart apology support chat)*
+> - ⚡ **Floating Judge Sandbox**: Tap the dock icon in the bottom-right corner of any screen for 1-click simulations (**Courier Delay + AI Auto-Voucher**, **Flash Sale Surge**, **Low Stock Chaos**).
 
 ---
 
@@ -107,51 +133,43 @@ New sellers must provide full KYC onboarding information before they can list pr
 
 ---
 
-## 🚀 How to Deploy on the Web (Free)
+## 🚀 1-Click Cloud Deployment (Free)
 
-The project is structured so **FastAPI serves both the backend API, WebSockets, and the frontend UI under a single URL**.
+The project is structured so **FastAPI serves both the backend API, WebSockets, and the frontend UI under a single URL**. Configured with root-level `render.yaml`, `railway.json`, `Procfile`, and `Dockerfile`.
 
-### Option 1: Deploy on Render.com (Recommended - 100% Free)
+### 🌟 Option 1: 1-Click Deploy on Render (Recommended - 100% Free)
 
-1. Go to **[Render.com](https://render.com/)** and sign in with your GitHub account.
-2. Click **New +** → **Web Service**.
-3. Select your repository: `soundararajan-1/ORDER-MANAGEMENT-SYSTEM`.
-4. Configure the service:
-   - **Name**: `orderflow-ai` (or any name you prefer)
-   - **Region**: Choose the closest region (e.g. *Singapore* or *Frankfurt*)
-   - **Runtime**: `Python 3`
-   - **Build Command**:
-     ```bash
-     pip install -r OrderFlow-AI/backend/requirements.txt
-     ```
-   - **Start Command**:
-     ```bash
-     uvicorn OrderFlow-AI.backend.main:app --host 0.0.0.0 --port $PORT
-     ```
-   - **Instance Type**: `Free`
-5. Click **Create Web Service**.
-6. Render will build and deploy your app in ~2 minutes and provide a free live URL:
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/soundararajan-1/ORDER-MANAGEMENT-SYSTEM)
+
+1. Click the **Deploy to Render** button above (or open [Render.com](https://render.com/deploy?repo=https://github.com/soundararajan-1/ORDER-MANAGEMENT-SYSTEM)).
+2. Sign in with GitHub and click **Apply Blueprint**.
+3. Render automatically reads [render.yaml](file:///c:/Users/ttcre/Downloads/OrderFlow-AI/render.yaml), installs Python dependencies, provisions environment variables, and launches the web service.
+4. Your application will be live in ~2 minutes at:
    `https://orderflow-ai.onrender.com`
 
 ---
 
-### Option 2: Deploy on Railway.app
+### 🚆 Option 2: 1-Click Deploy on Railway
 
-1. Go to **[Railway.app](https://railway.app/)** and connect GitHub.
-2. Click **New Project** → **Deploy from GitHub repo** → select `ORDER-MANAGEMENT-SYSTEM`.
-3. In the project settings, set:
-   - **Start Command**: `uvicorn OrderFlow-AI.backend.main:app --host 0.0.0.0 --port $PORT`
-4. Click **Generate Domain** under Settings → Networking to get your public HTTPS URL!
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/new?template=https://github.com/soundararajan-1/ORDER-MANAGEMENT-SYSTEM)
+
+1. Click the **Deploy on Railway** button above.
+2. Sign in with GitHub and select your repository.
+3. Railway automatically detects [railway.json](file:///c:/Users/ttcre/Downloads/OrderFlow-AI/railway.json) and [Dockerfile](file:///c:/Users/ttcre/Downloads/OrderFlow-AI/Dockerfile).
+4. Click **Deploy Now** and generate your public domain under **Settings → Networking**!
 
 ---
 
-### Option 3: Deploy with Docker
+### 🐳 Option 3: Deploy with Docker
 
-A production-ready `Dockerfile` is included in the repository. Deploy to any Docker-supported cloud:
+A production-ready `Dockerfile` is included in the root directory. Deploy anywhere Docker is supported (Render, AWS, DigitalOcean, Fly.io):
 
 ```bash
+# Build the Docker image
 docker build -t orderflow-ai .
-docker run -p 8000:8000 orderflow-ai
+
+# Run the container locally or in production
+docker run -p 8000:8000 -e PORT=8000 orderflow-ai
 ```
 Visit `http://localhost:8000` in your browser.
 
