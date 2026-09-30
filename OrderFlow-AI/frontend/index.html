@@ -7195,6 +7195,8 @@ async function adminDeleteCoupon(couponId){
   } catch(e){
     toast("Delete failed: " + e.message, "error");
   }
+}
+
 function openAdminEscrowConfigModal(currentVpa, currentName, currentCut){
   const root = document.getElementById("modal-root");
   root.innerHTML = `
