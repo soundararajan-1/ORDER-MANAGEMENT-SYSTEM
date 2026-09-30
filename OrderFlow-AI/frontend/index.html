@@ -824,6 +824,23 @@ function connectWebSocket(){
         if(activeTab === "Products & Stock") renderInventory();
       }
     }
+
+    // 19. Seller Payout Disbursed from Central Escrow
+    if(msg.type === "payout_disbursed"){
+      playOrderChime();
+      confettiBurst();
+      toast(msg.message || `🎉 Payout Disbursed: ₹${(msg.amount||0).toLocaleString()} settled to your account! (UTR: ${msg.utr})`, "success");
+      if(state.role === "seller") {
+        refreshActiveSellerTab();
+      }
+    }
+
+    // 20. Admin Treasury Update
+    if(msg.type === "treasury_update"){
+      if(state.role === "admin" && state.adminActiveTab === "Treasury & Escrow"){
+        renderAdminTreasury();
+      }
+    }
   };
   state.ws = ws;
 }
@@ -2265,31 +2282,17 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
   if(!modalRoot) return;
 
   const orderRef = "ORD" + Math.floor(100000 + Math.random() * 900000);
-  const sellerNames = [...new Set(state.cart.map(i=>{
-    const p = state.products.find(x=>x.id===i.product_id);
-    return p ? (p.seller_name || "OrderFlow Verified Store") : "OrderFlow Verified Store";
-  }))].join(", ") || "OrderFlow Verified Store";
-
-  const cartSellerIds = [...new Set(state.cart.map(i=>{
-    const p = state.products.find(x=>x.id===i.product_id);
-    return p ? p.seller_id : null;
-  }).filter(Boolean))];
-  const primarySellerId = cartSellerIds.length === 1 ? cartSellerIds[0] : "";
-  const primaryProduct = state.cart.length > 0 ? state.products.find(x=>x.id===state.cart[0].product_id) : null;
-  const initialVpa = (primarySellerId && primaryProduct && primaryProduct.seller_upi_id) 
-    ? primaryProduct.seller_upi_id.trim() 
-    : "orderflow.ai@okhdfcbank";
-  const merchantDisplayName = (primarySellerId && primaryProduct && (primaryProduct.seller_name || primaryProduct.brand_name))
-    ? (primaryProduct.seller_name || primaryProduct.brand_name)
-    : sellerNames;
-  const cleanMerchant = merchantDisplayName.replace(/[^a-zA-Z0-9 ]/g, '').trim().replace(/\s+/g, '+') || "OrderFlow+AI";
+  const initialVpa = "ttcreations2.0@ybl";
+  const merchantDisplayName = "OrderFlow Escrow (TT Creations)";
+  const cleanMerchant = "OrderFlow+Escrow";
   const upiDeepLink = `upi://pay?pa=${encodeURIComponent(initialVpa)}&pn=${cleanMerchant}&am=${finalPayable.toFixed(2)}&cu=INR&tn=OrderFlow_${orderRef}&tr=${orderRef}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(upiDeepLink)}&margin=1`;
 
   let intentData = {
     upi_id: initialVpa,
     merchant_name: merchantDisplayName,
-    is_direct_seller: Boolean(primarySellerId && primaryProduct && primaryProduct.seller_upi_id),
+    is_central_escrow: true,
+    commission_percent: 8.0,
     amount: finalPayable,
     order_ref: orderRef,
     upi_string: upiDeepLink,
@@ -2303,8 +2306,7 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
       body: JSON.stringify({
         amount: finalPayable,
         order_ref: orderRef,
-        seller_name: merchantDisplayName,
-        seller_id: primarySellerId
+        seller_name: merchantDisplayName
       })
     });
     if(res && res.qr_url) intentData = res;
@@ -2327,10 +2329,10 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
             </div>
             <div>
               <div class="flex items-center gap-2">
-                <h3 class="text-base sm:text-lg font-bold text-white tracking-wide">Dynamic UPI QR Checkout</h3>
-                <span class="text-[9px] bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider">NPCI Live</span>
+                <h3 class="text-base sm:text-lg font-bold text-white tracking-wide">Central UPI QR Checkout</h3>
+                <span class="text-[9px] bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider">🔒 Platform Escrow</span>
               </div>
-              <p class="text-[11px] text-white/50">Instant 0% Convenience Fee · Real-Time Bank Settlement</p>
+              <p class="text-[11px] text-white/50">Payments safely held in Platform Escrow until doorstep delivery</p>
             </div>
           </div>
           <button type="button" id="closeUpiModalBtn" class="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white flex items-center justify-center transition-all cursor-pointer">✕</button>
@@ -2410,17 +2412,17 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
             <!-- Beneficiary Store & Bank VPA -->
             <div class="p-3 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between text-xs">
               <div class="flex items-center gap-2.5">
-                <div class="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-sm">
-                  🏪
+                <div class="w-8 h-8 rounded-xl bg-purple-500/20 border border-purple-400/40 flex items-center justify-center text-sm shadow-[0_0_10px_rgba(168,85,247,0.3)]">
+                  🔒
                 </div>
                 <div>
-                  <p class="text-[10px] text-white/40 uppercase tracking-wider font-semibold">Beneficiary Payee</p>
-                  <p class="font-bold text-white text-xs">${intentData.merchant_name || 'Verified Merchant'}</p>
+                  <p class="text-[10px] text-white/40 uppercase tracking-wider font-semibold">Central Platform Escrow</p>
+                  <p class="font-bold text-white text-xs">${intentData.merchant_name || 'OrderFlow Escrow (TT Creations)'}</p>
                 </div>
               </div>
               <div class="text-right">
-                <span class="text-[9px] ${intentData.is_direct_seller ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/40' : 'bg-purple-500/20 text-purple-300 border border-purple-400/40'} font-semibold px-2 py-0.5 rounded-full inline-block">
-                  ${intentData.is_direct_seller ? '✓ Direct to Seller Bank' : 'Platform Escrow'}
+                <span class="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 font-semibold px-2 py-0.5 rounded-full inline-block">
+                  ✓ 100% Escrow Protected
                 </span>
                 <p class="text-[10px] font-mono text-cyan-300 mt-0.5 truncate max-w-[150px]">${intentData.upi_id}</p>
               </div>
@@ -2604,12 +2606,12 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
                 <span class="font-mono text-white font-bold">#${firstOrderId}</span>
               </div>
               <div class="flex justify-between">
-                <span class="text-white/50">Payment Mode:</span>
-                <span class="text-purple-300 font-semibold">UPI (Dynamic QR Code)</span>
+                <span class="text-white/50">Central Escrow VPA:</span>
+                <span class="font-mono text-cyan-300 font-semibold">ttcreations2.0@ybl</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-white/50">Settlement Status:</span>
-                <span class="text-emerald-400 font-bold">✓ Paid & Confirmed</span>
+                <span class="text-emerald-400 font-bold">🔒 Held in Escrow (Protected)</span>
               </div>
             </div>
 
@@ -2741,6 +2743,9 @@ function renderCustomerOrders(){
               <span class="text-[11px] px-2.5 py-0.5 rounded-full font-medium ${isPaid ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}">
                 ${isPaid ? '✓ ' + (o.payment_status || 'Paid') : '🟡 ' + (o.payment_status || 'COD Due')} (${o.payment_method || 'UPI'})
               </span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-medium">
+                🔒 Escrow Protected (ttcreations2.0@ybl)
+              </span>
               ${o.discount_amount > 0 ? `
                 <span class="text-[11px] px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 font-medium">
                   🎟️ ${o.coupon_code} (-₹${o.discount_amount})
@@ -2822,12 +2827,13 @@ async function enterSeller(isNewStore=false){
 
 async function renderSeller(tab="Overview", isNewStore=false){
   const app = document.getElementById("app");
-  app.innerHTML = navBar(["Overview","Live Orders","Products & Stock","Coupons","Kanban","Branding"], tab, (t)=>renderSeller(t)) + `<div id="sellerBody" class="max-w-7xl mx-auto px-4 pb-16"></div>`;
+  app.innerHTML = navBar(["Overview","Live Orders","Products & Stock","Settlements","Coupons","Kanban","Branding"], tab, (t)=>renderSeller(t)) + `<div id="sellerBody" class="max-w-7xl mx-auto px-4 pb-16"></div>`;
   wireNav((t)=>renderSeller(t));
 
   if(tab==="Overview") await renderSellerOverview(isNewStore);
   else if(tab==="Live Orders") renderSellerOrders();
   else if(tab==="Products & Stock") renderInventory();
+  else if(tab==="Settlements") await renderSellerSettlements();
   else if(tab==="Coupons") await renderSellerCoupons();
   else if(tab==="Branding") await renderSellerBranding();
   else renderKanban();
@@ -3104,9 +3110,14 @@ function renderSellerOrders(){
             <tr class="border-t border-white/5 fade-up hover:bg-white/[0.02] transition-colors">
               <td class="p-4 font-mono font-semibold text-white">#${o.id}<br><span class="text-[10px] text-white/40 font-sans">${o.created_at.replace("T"," ").slice(0,16)}</span></td>
               <td class="p-4 font-medium text-white">${o.customer_name}</td>
-              <td class="p-4 text-xs text-white/70 max-w-xs">${o.items.map(i=>`${i.name} (x${i.qty})`).join(', ')}</td>
-              <td class="p-4 font-bold text-cyan-300">₹${o.amount.toLocaleString()}</td>
-              <td class="p-4">${statusBadge(o.status)}</td>
+              <td class="p-4">
+                <span class="font-bold text-white block">₹${o.amount.toLocaleString()}</span>
+                <span class="text-[10px] text-emerald-400 block font-semibold">Net Payout: ₹${((o.seller_payout !== undefined && o.seller_payout !== null && o.seller_payout > 0) ? o.seller_payout : Math.round(o.amount * 0.92)).toLocaleString()}</span>
+              </td>
+              <td class="p-4 space-y-1">
+                ${statusBadge(o.status)}
+                <div class="mt-1">${payoutBadge(o.payout_status, o.disbursed_utr)}</div>
+              </td>
               <td class="p-4 text-xs">
                 <span class="font-mono text-white">${o.eta}</span>
                 ${o.delay_reason ? `<br><span class="text-[10px] text-amber-300">⚠️ ${o.delay_reason}</span>` : ''}
@@ -3396,6 +3407,238 @@ function statusBadge(status){
     Cancelled: "bg-red-500/20 text-red-300 border border-red-500/40"
   };
   return `<span class="text-xs px-2.5 py-0.5 rounded-full ${map[status]||'bg-white/10 text-white'}">${status}</span>`;
+}
+
+function payoutBadge(payoutStatus, utr=""){
+  if(payoutStatus === "disbursed"){
+    return `<span class="text-[10px] px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-semibold" title="${utr ? 'UTR: ' + utr : ''}">🏦 Settled${utr ? ' (' + utr.slice(-8) + ')' : ''}</span>`;
+  }
+  if(payoutStatus === "eligible_for_payout"){
+    return `<span class="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold">🟢 Ready for Payout</span>`;
+  }
+  if(payoutStatus === "cancelled"){
+    return `<span class="text-[10px] px-2.5 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/40">Cancelled</span>`;
+  }
+  return `<span class="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold">⏳ In Escrow</span>`;
+}
+
+/* ================= SELLER SETTLEMENTS & ESCROW TAB ================= */
+async function renderSellerSettlements(){
+  const body = document.getElementById('sellerBody');
+  if(!body) return;
+
+  let data = { summary: {}, settlements: [] };
+  try {
+    data = await api('/api/seller/settlements');
+  } catch(e) {
+    console.error("Settlements fetch error:", e);
+  }
+
+  const s = data.summary || {};
+  const settlements = data.settlements || [];
+
+  body.innerHTML = `
+    <!-- Header -->
+    <div class="glass p-5 mb-5 fade-up flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="text-xl">🏦</span>
+          <h3 class="text-xl font-bold text-white">Settlements & Platform Escrow</h3>
+          <span class="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 px-2 py-0.5 rounded-full font-semibold">Model B Escrow</span>
+        </div>
+        <p class="text-xs text-white/50 mt-1">
+          Automated 8% platform fee calculation · Customer funds held in Central Escrow (<code>${s.central_upi_id || 'ttcreations2.0@ybl'}</code>) until verified delivery
+        </p>
+      </div>
+
+      <button onclick="openSellerPayoutSettingsModal('${s.payout_upi_id || ''}', '${s.bank_account_no || ''}', '${s.bank_ifsc || ''}', '${s.bank_name || ''}')" class="btn-neon text-xs font-bold px-4 py-2 cursor-pointer flex items-center gap-1.5 shadow-lg">
+        <span>✏️ Bank & Payout Details</span>
+      </button>
+    </div>
+
+    <!-- 5 KPI Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 mb-6">
+      <div class="glass p-4 fade-up border-cyan-500/30">
+        <p class="text-[10px] font-bold text-cyan-300 uppercase tracking-wider mb-1">Lifetime Gross Sales</p>
+        <p class="text-2xl font-black text-white">₹${(s.total_gross || 0).toLocaleString()}</p>
+        <p class="text-[10px] text-white/40 mt-1">Total revenue billed</p>
+      </div>
+
+      <div class="glass p-4 fade-up border-purple-500/30">
+        <p class="text-[10px] font-bold text-purple-300 uppercase tracking-wider mb-1">Platform Cut (${s.commission_percent || 8}%)</p>
+        <p class="text-2xl font-black text-purple-200">₹${(s.total_platform_fees || 0).toLocaleString()}</p>
+        <p class="text-[10px] text-white/40 mt-1">Marketplace service fee</p>
+      </div>
+
+      <div class="glass p-4 fade-up border-amber-500/30">
+        <p class="text-[10px] font-bold text-amber-300 uppercase tracking-wider mb-1">⏳ In Escrow</p>
+        <p class="text-2xl font-black text-amber-300">₹${(s.in_escrow || 0).toLocaleString()}</p>
+        <p class="text-[10px] text-white/40 mt-1">Orders in delivery</p>
+      </div>
+
+      <div class="glass p-4 fade-up border-emerald-500/30">
+        <p class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider mb-1">🟢 Ready for Payout</p>
+        <p class="text-2xl font-black text-emerald-300">₹${(s.eligible_payout || 0).toLocaleString()}</p>
+        <p class="text-[10px] text-white/40 mt-1">Delivered, awaiting payout</p>
+      </div>
+
+      <div class="glass p-4 fade-up border-blue-500/30">
+        <p class="text-[10px] font-bold text-blue-300 uppercase tracking-wider mb-1">🏦 Disbursed to Bank</p>
+        <p class="text-2xl font-black text-cyan-200">₹${(s.total_disbursed || 0).toLocaleString()}</p>
+        <p class="text-[10px] text-white/40 mt-1">Settled to your bank/UPI</p>
+      </div>
+    </div>
+
+    <!-- Payout Destination Banner -->
+    <div class="glass p-4 rounded-2xl mb-6 border border-white/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-gradient-to-r from-cyan-950/40 to-slate-900/40">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-lg">
+          💳
+        </div>
+        <div>
+          <p class="text-xs font-bold text-white flex items-center gap-2">
+            <span>Payout Destination Account</span>
+            <span class="text-[9px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30 font-semibold">Active for Payouts</span>
+          </p>
+          <p class="text-xs text-white/60 mt-0.5">
+            UPI: <span class="font-mono text-cyan-300 font-bold">${s.payout_upi_id || 'Not configured'}</span> · 
+            Bank: <span class="text-white/80">${s.bank_name || 'Bank'} (${s.bank_account_no ? '••••' + s.bank_account_no.slice(-4) : 'Acct not set'})</span> · 
+            IFSC: <span class="font-mono text-white/80">${s.bank_ifsc || 'N/A'}</span>
+          </p>
+        </div>
+      </div>
+      <button onclick="openSellerPayoutSettingsModal('${s.payout_upi_id || ''}', '${s.bank_account_no || ''}', '${s.bank_ifsc || ''}', '${s.bank_name || ''}')" class="text-xs text-cyan-300 hover:underline cursor-pointer py-1 px-3 rounded-lg bg-white/5 border border-white/10">
+        Update Details →
+      </button>
+    </div>
+
+    <!-- Settlement Ledger -->
+    <div class="glass p-5 fade-up">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+        <div>
+          <h4 class="text-base font-bold text-white">Order Settlement Ledger (${settlements.length})</h4>
+          <p class="text-xs text-white/40">Breakdown of gross amounts, 8% platform fee deduction, and net seller payout per order</p>
+        </div>
+        <div class="flex items-center gap-2 w-full sm:w-auto">
+          <input type="text" id="settlementSearchInput" placeholder="Filter Order ID or Customer..." oninput="filterSettlementTable()" class="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-white/40 focus:outline-none focus:border-cyan-400 w-full sm:w-60" />
+        </div>
+      </div>
+
+      <div class="overflow-x-auto scrollbar-thin">
+        <table class="w-full text-left text-xs" id="settlementsTable">
+          <thead>
+            <tr class="border-b border-white/10 text-white/40 font-semibold uppercase text-[10px]">
+              <th class="py-3 px-3">Order ID</th>
+              <th class="py-3 px-3">Date</th>
+              <th class="py-3 px-3">Customer</th>
+              <th class="py-3 px-3">Gross Total</th>
+              <th class="py-3 px-3">Marketplace Fee (8%)</th>
+              <th class="py-3 px-3">Net Seller Payout</th>
+              <th class="py-3 px-3">Order Status</th>
+              <th class="py-3 px-3">Settlement Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5">
+            ${settlements.map(item => `
+              <tr class="hover:bg-white/5 transition-colors settlement-row" data-order="${item.order_id}" data-customer="${(item.customer_name||'').toLowerCase()}">
+                <td class="py-3 px-3 font-mono font-bold text-cyan-300">#${item.order_id}</td>
+                <td class="py-3 px-3 text-white/60">${(item.created_at || '').slice(0, 10)}</td>
+                <td class="py-3 px-3 text-white/80">${item.customer_name || 'Customer'}</td>
+                <td class="py-3 px-3 text-white font-semibold">₹${item.amount.toLocaleString()}</td>
+                <td class="py-3 px-3 text-purple-300">-₹${item.platform_fee.toLocaleString()}</td>
+                <td class="py-3 px-3 font-bold text-emerald-400">₹${item.seller_payout.toLocaleString()}</td>
+                <td class="py-3 px-3">${statusBadge(item.order_status)}</td>
+                <td class="py-3 px-3">${payoutBadge(item.payout_status, item.disbursed_utr)}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="8" class="text-center py-8 text-white/40">No orders recorded for settlement yet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function filterSettlementTable(){
+  const q = document.getElementById("settlementSearchInput")?.value.toLowerCase().trim() || "";
+  const rows = document.querySelectorAll(".settlement-row");
+  rows.forEach(r => {
+    const o = r.getAttribute("data-order")?.toLowerCase() || "";
+    const c = r.getAttribute("data-customer")?.toLowerCase() || "";
+    if(!q || o.includes(q) || c.includes(q)){
+      r.style.display = "";
+    } else {
+      r.style.display = "none";
+    }
+  });
+}
+
+function openSellerPayoutSettingsModal(upi="", acct="", ifsc="", bank=""){
+  const modalRoot = document.getElementById("modal-root");
+  if(!modalRoot) return;
+
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4 z-50">
+      <div class="glass glow-border p-6 w-full max-w-md pop-in bg-[#070b22]/98 border-cyan-500/40 relative z-50 rounded-3xl">
+        <div class="flex justify-between items-center pb-3 mb-4 border-b border-white/10">
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <span>🏦 Bank & Payout Configuration</span>
+          </h3>
+          <button onclick="closeModal()" class="text-white/60 hover:text-white cursor-pointer">✕</button>
+        </div>
+
+        <p class="text-xs text-white/50 mb-4">
+          Marketplace payouts for completed orders will be transferred directly to this account via NEFT/IMPS/UPI.
+        </p>
+
+        <form id="payoutSettingsForm" class="space-y-3.5 text-xs">
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Seller UPI ID (VPA)</label>
+            <input type="text" id="sellerUpiInput" value="${upi}" placeholder="e.g. yourstore@okhdfcbank" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Bank Name</label>
+            <input type="text" id="sellerBankNameInput" value="${bank}" placeholder="e.g. HDFC Bank, ICICI Bank" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Bank Account Number</label>
+            <input type="text" id="sellerAcctInput" value="${acct}" placeholder="e.g. 50100234567890" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Bank IFSC Code</label>
+            <input type="text" id="sellerIfscInput" value="${ifsc}" placeholder="e.g. HDFC0001234" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white font-mono uppercase focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div class="flex gap-2 pt-2">
+            <button type="button" onclick="closeModal()" class="flex-1 py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 font-semibold cursor-pointer">Cancel</button>
+            <button type="submit" class="flex-1 btn-neon py-2 px-3 font-bold cursor-pointer">Save Account</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("payoutSettingsForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const upi_id = document.getElementById("sellerUpiInput").value.trim();
+    const bank_name = document.getElementById("sellerBankNameInput").value.trim();
+    const bank_account_no = document.getElementById("sellerAcctInput").value.trim();
+    const bank_ifsc = document.getElementById("sellerIfscInput").value.trim().toUpperCase();
+
+    try {
+      await api("/api/seller/payout-details", {
+        method: "PATCH",
+        body: JSON.stringify({ upi_id, bank_name, bank_account_no, bank_ifsc })
+      });
+      toast("Payout and bank details updated successfully!", "success");
+      closeModal();
+      renderSellerSettlements();
+    } catch(err){
+      toast("Failed to update payout details: " + err.message, "error");
+    }
+  };
 }
 
 /* ================= SELLER COUPONS TAB ================= */
@@ -4961,10 +5204,34 @@ async function renderSellerBranding(){
           <textarea id="brandDescInput" rows="2" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400">${profile.brand_description || ''}</textarea>
         </div>
 
-        <div>
-          <label class="block text-xs font-semibold text-white/80 mb-1">Seller UPI ID (VPA) for Direct Bank Payouts</label>
-          <input type="text" id="brandUpiInput" value="${profile.upi_id || ''}" placeholder="e.g. yourbrand@okhdfcbank or 9876543210@upi" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-400" />
-          <p class="text-[10px] text-white/40 mt-1">Real-time Dynamic UPI QR codes at checkout will route payments with the exact bill amount directly to this bank account.</p>
+        <div class="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-3">
+          <p class="text-xs font-bold text-white flex items-center gap-1.5">
+            <span>🏦 Bank & UPI Payout Destination (Settlement Account)</span>
+            <span class="text-[9px] bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded border border-cyan-500/30">Direct Disbursals</span>
+          </p>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Seller UPI ID (VPA)</label>
+              <input type="text" id="brandUpiInput" value="${profile.upi_id || ''}" placeholder="e.g. yourbrand@okhdfcbank" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-400" />
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Bank Name</label>
+              <input type="text" id="brandBankNameInput" value="${profile.bank_name || ''}" placeholder="e.g. HDFC Bank" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Bank Account Number</label>
+              <input type="text" id="brandBankAcctInput" value="${profile.bank_account_no || ''}" placeholder="e.g. 50100123456789" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-white/80 mb-1">Bank IFSC Code</label>
+              <input type="text" id="brandBankIfscInput" value="${profile.bank_ifsc || ''}" placeholder="e.g. HDFC0001234" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs font-mono uppercase text-white focus:outline-none focus:border-cyan-400" />
+            </div>
+          </div>
+          <p class="text-[10px] text-white/40">Marketplace settlements (92% net payout after 8% commission) are transferred directly to this account.</p>
         </div>
 
         <button type="submit" class="btn-neon font-bold text-xs px-6 py-3 cursor-pointer">
@@ -4988,14 +5255,17 @@ async function renderSellerBranding(){
     const store_banner = document.getElementById("brandBannerUrl").value.trim();
     const brand_description = document.getElementById("brandDescInput").value.trim();
     const upi_id = document.getElementById("brandUpiInput")?.value.trim() || "";
+    const bank_name = document.getElementById("brandBankNameInput")?.value.trim() || "";
+    const bank_account_no = document.getElementById("brandBankAcctInput")?.value.trim() || "";
+    const bank_ifsc = document.getElementById("brandBankIfscInput")?.value.trim().toUpperCase() || "";
 
     try {
       const updated = await api("/api/sellers/branding", {
         method: "PATCH",
-        body: JSON.stringify({ brand_color, brand_name, store_logo, store_banner, brand_description, upi_id })
+        body: JSON.stringify({ brand_color, brand_name, store_logo, store_banner, brand_description, upi_id, bank_name, bank_account_no, bank_ifsc })
       });
       state.user = { ...state.user, ...updated };
-      toast("Store branding and UPI details updated successfully!", "success");
+      toast("Store branding and payout details updated successfully!", "success");
       renderSellerBranding();
     } catch(err){
       toast("Failed to update branding: " + err.message, "error");
@@ -5398,6 +5668,7 @@ async function renderAdmin(tab="Overview"){
   const app = document.getElementById("app");
   const tabs = [
     "Overview",
+    "Treasury & Escrow",
     "AI Sentinel",
     "Seller Verification",
     "All Users",
@@ -5411,6 +5682,7 @@ async function renderAdmin(tab="Overview"){
   wireNav((t)=>renderAdmin(t));
 
   if(tab === "Overview") await renderAdminOverview();
+  else if(tab === "Treasury & Escrow") await renderAdminTreasury();
   else if(tab === "AI Sentinel") await renderAdminSentinel();
   else if(tab === "Seller Verification") await renderAdminSellers();
   else if(tab === "All Users") await renderAdminUsers();
@@ -5447,6 +5719,9 @@ async function renderAdminOverview(){
       </div>
 
       <div class="flex items-center gap-2 flex-wrap">
+        <button onclick="renderAdmin('Treasury & Escrow')" class="glass px-4 py-2 rounded-xl text-xs font-bold text-cyan-300 border border-cyan-400/40 cursor-pointer flex items-center gap-1.5 hover:bg-white/10">
+          <span>🏦 Treasury & Escrow</span>
+        </button>
         <button onclick="renderAdmin('Seller Verification')" class="btn-neon text-xs font-bold px-4 py-2 cursor-pointer flex items-center gap-1.5">
           <span>🛡️ Pending Sellers (${s.pending_seller_verifications || 0})</span>
         </button>
@@ -5487,12 +5762,21 @@ async function renderAdminOverview(){
       </div>
     ` : ''}
 
-    <!-- 4 Major Stat Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <!-- 5 Major Stat Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
       <div class="glass p-5 fade-up border-cyan-400/30">
         <span class="text-xs text-white/50 uppercase tracking-wider font-semibold">Platform GMV</span>
         <div class="text-2xl font-bold font-mono text-cyan-300 mt-2">₹${(s.total_revenue || 0).toLocaleString()}</div>
         <p class="text-[11px] text-white/40 mt-1">Gross sales across all stores</p>
+      </div>
+
+      <div class="glass p-5 fade-up border-amber-400/40 bg-amber-500/5 cursor-pointer hover:border-amber-400 transition-colors" onclick="renderAdmin('Treasury & Escrow')">
+        <span class="text-xs text-amber-300 uppercase tracking-wider font-semibold flex items-center justify-between">
+          <span>8% Net Commission</span>
+          <span class="text-[9px] bg-amber-500/20 px-1.5 py-0.5 rounded text-amber-300 font-mono">Escrow</span>
+        </span>
+        <div class="text-2xl font-bold font-mono text-amber-300 mt-2">₹${(s.platform_commission_earned || Math.round((s.total_revenue || 0) * 0.08)).toLocaleString()}</div>
+        <p class="text-[11px] text-white/40 mt-1">Marketplace Treasury & Payouts →</p>
       </div>
 
       <div class="glass p-5 fade-up border-purple-400/30">
@@ -5553,6 +5837,245 @@ async function renderAdminOverview(){
         </table>
       </div>
     </div>`;
+}
+
+/* ================= ADMIN TREASURY & ESCROW TAB ================= */
+async function renderAdminTreasury(){
+  const body = document.getElementById("adminBody");
+  if(!body) return;
+
+  let data = { summary: {}, pending_disbursals: [], disbursed_history: [], escrow_orders: [] };
+  try {
+    data = await api("/api/admin/treasury");
+  } catch(e){
+    console.error("Treasury fetch error:", e);
+  }
+
+  const s = data.summary || {};
+  const pending = data.pending_disbursals || [];
+  const history = data.disbursed_history || [];
+
+  body.innerHTML = `
+    <!-- Header -->
+    <div class="glass p-5 mb-5 fade-up flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="text-xl">🏦</span>
+          <h3 class="text-xl font-bold text-white">Marketplace Treasury & Central UPI Escrow</h3>
+          <span class="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full font-semibold">Central Escrow</span>
+        </div>
+        <p class="text-xs text-white/50 mt-1">
+          Central Payments: <code class="text-cyan-300">${s.central_upi_id || 'ttcreations2.0@ybl'}</code> · Platform Commission: <strong class="text-white">${s.commission_percent || 8}%</strong> · Instant Seller Disbursals
+        </p>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button onclick="renderAdminTreasury()" class="text-xs px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 cursor-pointer flex items-center gap-1.5">
+          <span>🔄 Refresh Treasury</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 4 Major Treasury Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="glass p-5 fade-up border-cyan-400/30">
+        <span class="text-xs text-cyan-300 uppercase tracking-wider font-semibold">Central Escrow Balance</span>
+        <div class="text-2xl font-bold font-mono text-white mt-2">₹${(s.total_escrow_holding || 0).toLocaleString()}</div>
+        <p class="text-[11px] text-white/40 mt-1">Held at ${s.central_upi_id || 'ttcreations2.0@ybl'}</p>
+      </div>
+
+      <div class="glass p-5 fade-up border-purple-400/30">
+        <span class="text-xs text-purple-300 uppercase tracking-wider font-semibold">Marketplace Revenue (8%)</span>
+        <div class="text-2xl font-bold font-mono text-purple-300 mt-2">₹${(s.total_commission_earned || 0).toLocaleString()}</div>
+        <p class="text-[11px] text-white/40 mt-1">Platform fee retained to date</p>
+      </div>
+
+      <div class="glass p-5 fade-up border-amber-400/30">
+        <span class="text-xs text-amber-300 uppercase tracking-wider font-semibold">Pending Seller Payouts</span>
+        <div class="text-2xl font-bold font-mono text-amber-300 mt-2">₹${(s.pending_payout_amount || 0).toLocaleString()}</div>
+        <p class="text-[11px] text-white/40 mt-1">${s.pending_count || 0} completed orders ready to disburse</p>
+      </div>
+
+      <div class="glass p-5 fade-up border-emerald-400/30">
+        <span class="text-xs text-emerald-300 uppercase tracking-wider font-semibold">Total Disbursed</span>
+        <div class="text-2xl font-bold font-mono text-emerald-300 mt-2">₹${(s.total_disbursed_amount || 0).toLocaleString()}</div>
+        <p class="text-[11px] text-white/40 mt-1">${s.disbursed_count || 0} payouts settled historically</p>
+      </div>
+    </div>
+
+    <!-- Section 1: Pending Disbursals Queue -->
+    <div class="glass p-5 mb-6 fade-up">
+      <div class="flex justify-between items-center mb-4">
+        <div>
+          <h4 class="text-base font-bold text-white flex items-center gap-2">
+            <span>⚡ Ready for Disbursal (${pending.length})</span>
+            ${pending.length > 0 ? '<span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>' : ''}
+          </h4>
+          <p class="text-xs text-white/40">Delivered orders where platform escrow can now be released and transferred to the seller</p>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto scrollbar-thin">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-white/10 text-white/40 font-semibold uppercase text-[10px]">
+              <th class="py-3 px-3">Order ID</th>
+              <th class="py-3 px-3">Seller Name</th>
+              <th class="py-3 px-3">Payout Destination</th>
+              <th class="py-3 px-3">Gross Total</th>
+              <th class="py-3 px-3">Platform Cut (8%)</th>
+              <th class="py-3 px-3">Net Payable</th>
+              <th class="py-3 px-3">Action</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5">
+            ${pending.map(item => `
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-3 font-mono font-bold text-white">#${item.order_id}</td>
+                <td class="py-3 px-3 text-white/90">
+                  <span class="font-medium">${item.seller_name}</span>
+                  <span class="text-[10px] text-white/40 block">#${item.seller_id}</span>
+                </td>
+                <td class="py-3 px-3">
+                  <span class="font-mono text-cyan-300 font-semibold block">${item.seller_upi || 'No UPI'}</span>
+                  <span class="text-[10px] text-white/50 block">${item.bank_name || 'Bank'}: ${item.bank_account_no ? '••' + item.bank_account_no.slice(-4) : 'Acct pending'} (${item.bank_ifsc || 'IFSC'})</span>
+                </td>
+                <td class="py-3 px-3 text-white font-semibold">₹${item.amount.toLocaleString()}</td>
+                <td class="py-3 px-3 text-purple-300 font-medium">+₹${item.platform_fee.toLocaleString()}</td>
+                <td class="py-3 px-3 font-bold text-emerald-300 text-sm">₹${item.seller_payout.toLocaleString()}</td>
+                <td class="py-3 px-3">
+                  <button onclick="openDisburseModal('${item.order_id}', '${item.seller_name.replace(/'/g, "\\'")}', '${item.seller_upi}', ${item.seller_payout})" class="btn-neon text-[11px] font-bold px-3 py-1.5 cursor-pointer shadow-md flex items-center gap-1">
+                    <span>⚡ 1-Click Disburse</span>
+                  </button>
+                </td>
+              </tr>
+            `).join('') || '<tr><td colspan="7" class="text-center py-8 text-white/40">🎉 All completed orders have been disbursed to sellers. No pending payouts.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Section 2: Settled Disbursals Ledger -->
+    <div class="glass p-5 fade-up">
+      <div class="flex justify-between items-center mb-4">
+        <div>
+          <h4 class="text-base font-bold text-white">Disbursed Payouts Audit Ledger (${history.length})</h4>
+          <p class="text-xs text-white/40">Historical log of all transfers from central escrow to seller accounts</p>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto scrollbar-thin">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-white/10 text-white/40 font-semibold uppercase text-[10px]">
+              <th class="py-3 px-3">Order Ref</th>
+              <th class="py-3 px-3">Seller Store</th>
+              <th class="py-3 px-3">Amount Paid</th>
+              <th class="py-3 px-3">Banking UTR Reference</th>
+              <th class="py-3 px-3">Settlement Date</th>
+              <th class="py-3 px-3">Authorized By</th>
+              <th class="py-3 px-3">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-white/5">
+            ${history.map(item => `
+              <tr class="hover:bg-white/5 transition-colors">
+                <td class="py-3 px-3 font-mono font-bold text-cyan-300">#${item.order_id}</td>
+                <td class="py-3 px-3 text-white/90">${item.seller_name}</td>
+                <td class="py-3 px-3 font-bold text-emerald-400">₹${item.seller_payout.toLocaleString()}</td>
+                <td class="py-3 px-3 font-mono text-cyan-300 font-semibold">${item.disbursed_utr || 'UTR-SETTLED'}</td>
+                <td class="py-3 px-3 text-white/60">${(item.disbursed_at || item.created_at || '').slice(0, 16).replace('T', ' ')}</td>
+                <td class="py-3 px-3 text-white/70">${item.disbursed_by || 'Admin'}</td>
+                <td class="py-3 px-3">
+                  <span class="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full font-semibold">✓ Disbursed</span>
+                </td>
+              </tr>
+            `).join('') || '<tr><td colspan="7" class="text-center py-6 text-white/40">No historical disbursals recorded yet.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function openDisburseModal(orderId, sellerName, sellerUpi, amount){
+  const modalRoot = document.getElementById("modal-root");
+  if(!modalRoot) return;
+
+  const genUtr = "UTR" + Date.now().toString().slice(-8) + Math.floor(1000 + Math.random() * 9000);
+
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4 z-50">
+      <div class="glass glow-border p-6 w-full max-w-md pop-in bg-[#070b22]/98 border-cyan-500/40 relative z-50 rounded-3xl shadow-2xl">
+        <div class="flex justify-between items-center pb-3 mb-4 border-b border-white/10">
+          <div class="flex items-center gap-2">
+            <span class="text-xl">⚡</span>
+            <h3 class="text-base font-bold text-white">Disburse Seller Payout</h3>
+          </div>
+          <button onclick="closeModal()" class="text-white/60 hover:text-white cursor-pointer">✕</button>
+        </div>
+
+        <div class="p-3.5 rounded-2xl bg-white/5 border border-white/10 space-y-2 mb-4 text-xs">
+          <div class="flex justify-between">
+            <span class="text-white/50">Order Reference:</span>
+            <span class="font-mono text-cyan-300 font-bold">#${orderId}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-white/50">Beneficiary Seller:</span>
+            <span class="text-white font-semibold">${sellerName}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-white/50">Payout UPI / Account:</span>
+            <span class="font-mono text-white/90 font-medium">${sellerUpi || 'Bank Transfer'}</span>
+          </div>
+          <div class="flex justify-between border-t border-white/10 pt-2">
+            <span class="text-white font-semibold">Net Payout Amount:</span>
+            <span class="text-lg font-black text-emerald-400">₹${amount.toLocaleString()}</span>
+          </div>
+        </div>
+
+        <form id="disburseForm" class="space-y-3 text-xs">
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Bank UTR / Transaction Reference</label>
+            <input type="text" id="disburseUtrInput" value="${genUtr}" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400" required />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Payout Notes (Optional)</label>
+            <input type="text" id="disburseNotesInput" placeholder="Settled via Fast UPI / IMPS" value="Direct NPCI Settlement" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-white text-xs focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div class="flex gap-2 pt-2">
+            <button type="button" onclick="closeModal()" class="flex-1 py-2 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 font-semibold cursor-pointer">Cancel</button>
+            <button type="submit" id="confirmDisburseSubmitBtn" class="flex-1 btn-neon py-2 px-3 font-bold cursor-pointer">Confirm & Disburse</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("disburseForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const btn = document.getElementById("confirmDisburseSubmitBtn");
+    if(btn) { btn.disabled = true; btn.textContent = "Processing..."; }
+    const utr = document.getElementById("disburseUtrInput").value.trim();
+    const notes = document.getElementById("disburseNotesInput").value.trim();
+
+    try {
+      const res = await api("/api/admin/payouts/disburse", {
+        method: "POST",
+        body: JSON.stringify({ order_id: orderId, utr_number: utr, notes: notes })
+      });
+      playOrderChime();
+      confettiBurst();
+      toast(res.message || "Payout disbursed successfully!", "success");
+      closeModal();
+      renderAdminTreasury();
+    } catch(err){
+      toast("Disbursal failed: " + err.message, "error");
+      if(btn) { btn.disabled = false; btn.textContent = "Confirm & Disburse"; }
+    }
+  };
 }
 
 /* ---------- ADMIN TAB: AI SENTINEL AUTONOMOUS LOGS ---------- */
@@ -6432,6 +6955,52 @@ async function renderAdminConfig(){
         </div>
       </div>
 
+      <!-- Central UPI Escrow Configuration (Model B Marketplace) -->
+      <div class="glass p-5 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/5 via-cyan-500/5 to-purple-500/5 mb-8">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-white/10">
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-[10px] uppercase font-bold tracking-wider text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">Model B Escrow Core</span>
+              <span class="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 flex items-center gap-1">● Active NPCI Escrow</span>
+            </div>
+            <h3 class="text-lg font-bold text-white flex items-center gap-2">
+              <span>🏦 Central UPI & Marketplace Commission Engine</span>
+            </h3>
+            <p class="text-xs text-white/50">All customer checkout payments route to the platform escrow VPA. 8% commission is retained; 92% is disbursed to sellers upon order completion.</p>
+          </div>
+          <button onclick="openAdminEscrowConfigModal('${config.central_upi_id || 'ttcreations2.0@ybl'}', '${config.platform_payee_name || 'OrderFlow Escrow (TT Creations)'}', ${config.commission_percent ?? 8.0})" class="btn-neon text-xs font-bold px-4 py-2 cursor-pointer flex items-center gap-1.5 whitespace-nowrap">
+            <span>⚙️</span> Edit Escrow & Commission
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+          <div class="p-3.5 rounded-xl bg-white/5 border border-white/10">
+            <span class="text-[10px] uppercase font-bold text-white/40 block mb-1">Central Platform VPA (Escrow)</span>
+            <p class="text-sm font-mono font-bold text-amber-300 flex items-center gap-2">
+              <span>${config.central_upi_id || 'ttcreations2.0@ybl'}</span>
+              <button onclick="navigator.clipboard.writeText('${config.central_upi_id || 'ttcreations2.0@ybl'}'); toast('VPA copied to clipboard!', 'info')" class="text-xs text-white/40 hover:text-white cursor-pointer" title="Copy VPA">📋</button>
+            </p>
+            <p class="text-[10px] text-white/40 mt-1">Payee: ${config.platform_payee_name || 'OrderFlow Escrow (TT Creations)'}</p>
+          </div>
+
+          <div class="p-3.5 rounded-xl bg-white/5 border border-white/10">
+            <span class="text-[10px] uppercase font-bold text-white/40 block mb-1">Marketplace Commission Cut</span>
+            <p class="text-base font-bold text-cyan-300 font-mono">
+              ${config.commission_percent ?? 8.0}% <span class="text-xs text-white/50 font-normal">per order</span>
+            </p>
+            <p class="text-[10px] text-emerald-400 mt-1">${100 - (config.commission_percent ?? 8.0)}% settled to seller on completion</p>
+          </div>
+
+          <div class="p-3.5 rounded-xl bg-white/5 border border-white/10">
+            <span class="text-[10px] uppercase font-bold text-white/40 block mb-1">Escrow Payout Flow</span>
+            <p class="text-xs font-bold text-white flex items-center gap-1.5 mt-0.5">
+              <span>🔒 100% Buyer Protection</span>
+            </p>
+            <p class="text-[10px] text-white/40 mt-1">Disbursed via Admin Treasury via IMPS/NEFT/UPI</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Marketplace Global Coupons -->
       <div>
         <div class="flex justify-between items-center mb-3">
@@ -6532,6 +7101,67 @@ async function adminDeleteCoupon(couponId){
   } catch(e){
     toast("Delete failed: " + e.message, "error");
   }
+function openAdminEscrowConfigModal(currentVpa, currentName, currentCut){
+  const root = document.getElementById("modal-root");
+  root.innerHTML = `
+    <div class="modal-backdrop flex items-center justify-center p-4">
+      <div class="glass glow-border p-6 w-full max-w-md pop-in bg-[#070b22]/98 relative z-50">
+        <div class="flex justify-between items-center mb-3 pb-2 border-b border-white/10">
+          <div>
+            <h3 class="text-base font-bold text-white">Platform Escrow & Commission Settings</h3>
+            <p class="text-xs text-white/50">Model B Centralized Payment Gateway</p>
+          </div>
+          <button onclick="closeModal()" class="text-white/40 hover:text-white cursor-pointer text-sm">✕</button>
+        </div>
+
+        <form id="adminEscrowConfigForm" class="space-y-4 text-xs">
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Central Platform UPI ID (Escrow VPA) *</label>
+            <input id="adEscrowVpa" required type="text" value="${currentVpa}" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-amber-300 focus:outline-none focus:border-amber-400" />
+            <p class="text-[10px] text-white/40 mt-1">Must be an active, bank-registered UPI ID (e.g. ttcreations2.0@ybl).</p>
+          </div>
+
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Platform Payee Name *</label>
+            <input id="adEscrowName" required type="text" value="${currentName}" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400" />
+          </div>
+
+          <div>
+            <label class="block font-semibold text-white/80 mb-1">Marketplace Commission Percentage (%) *</label>
+            <input id="adEscrowCut" required type="number" step="0.1" min="0" max="100" value="${currentCut}" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-400" />
+            <p class="text-[10px] text-white/40 mt-1">Standard marketplace rate: 8.0%. Sellers receive the remaining net amount.</p>
+          </div>
+
+          <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-200">
+            ⚠️ <strong>Notice:</strong> Changing the Central UPI ID immediately updates the dynamic QR code for all new customer checkouts.
+          </div>
+
+          <div class="pt-2 flex justify-end gap-2">
+            <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl text-xs text-white/60 hover:text-white cursor-pointer">Cancel</button>
+            <button type="submit" class="btn-neon text-xs font-bold px-5 py-2 cursor-pointer">💾 Save Settings</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  document.getElementById("adminEscrowConfigForm").onsubmit = async (e)=>{
+    e.preventDefault();
+    const central_upi_id = document.getElementById("adEscrowVpa").value.trim();
+    const platform_payee_name = document.getElementById("adEscrowName").value.trim();
+    const commission_percent = parseFloat(document.getElementById("adEscrowCut").value);
+
+    try {
+      await api("/api/admin/platform-config", {
+        method: "POST",
+        body: JSON.stringify({ central_upi_id, platform_payee_name, commission_percent })
+      });
+      closeModal();
+      toast("Escrow and Commission settings updated successfully!", "success");
+      await renderAdminConfig();
+    } catch(err){
+      toast("Error updating escrow settings: " + err.message, "error");
+    }
+  };
 }
 
 function closeModal(){
@@ -6660,6 +7290,28 @@ function renderSandboxToolbar(){
             </div>
             <span class="text-emerald-400 text-xs">Test →</span>
           </button>
+
+          <button onclick="quickJumpToSellerSettlements()" class="w-full text-left p-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-500/30 hover:border-cyan-400 text-xs text-white transition-all flex items-center justify-between cursor-pointer">
+            <div class="flex items-center gap-2">
+              <span>💰</span>
+              <div>
+                <p class="font-bold text-white text-[11px]">Seller: Settlements & Payout Hub</p>
+                <p class="text-[9px] text-cyan-300/80">View 8% escrow cut, net payout & bank details</p>
+              </div>
+            </div>
+            <span class="text-cyan-400 text-xs">Jump →</span>
+          </button>
+
+          <button onclick="quickJumpToAdminTreasury()" class="w-full text-left p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/30 hover:border-amber-400 text-xs text-white transition-all flex items-center justify-between cursor-pointer">
+            <div class="flex items-center gap-2">
+              <span>🏦</span>
+              <div>
+                <p class="font-bold text-white text-[11px]">Admin: Marketplace Treasury & Escrow</p>
+                <p class="text-[9px] text-amber-300/80">Central UPI balance, 8% fee & 1-click disbursal</p>
+              </div>
+            </div>
+            <span class="text-amber-400 text-xs">Jump →</span>
+          </button>
         </div>
 
         <button onclick="openSentinelAuditModal()" class="w-full text-left p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium text-white/80 transition-all flex items-center justify-between cursor-pointer">
@@ -6787,6 +7439,52 @@ async function quickJumpToUpiQrCheckout(){
     openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, state.deliveryAddress || "742 Evergreen Terrace, Mumbai", state.deliveryPhone || "+91 98765 43210");
   } catch(e){
     toast("UPI test launch failed: " + e.message, "error");
+  }
+}
+
+async function quickJumpToSellerSettlements(){
+  closeModal();
+  toggleSandbox(false);
+  toast("🚀 Switching to Seller Settlements...", "info");
+  try {
+    const res = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({id: "1001001", password: "seller123", role: "seller"})
+    });
+    state.token = res.access_token;
+    state.user = res.user;
+    state.role = "seller";
+    localStorage.setItem("orderflow_token", state.token);
+    localStorage.setItem("orderflow_role", state.role);
+    localStorage.setItem("orderflow_user", JSON.stringify(state.user));
+    await enterSeller();
+    renderSeller("Settlements");
+    toast("💰 Seller Settlements Hub: View 8% Escrow cut, net balance & bank details!", "success");
+  } catch(e){
+    toast("Switch failed: " + e.message, "error");
+  }
+}
+
+async function quickJumpToAdminTreasury(){
+  closeModal();
+  toggleSandbox(false);
+  toast("🚀 Switching to Marketplace Treasury...", "info");
+  try {
+    const res = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({id: "956673", password: "Soundar@52122", role: "admin"})
+    });
+    state.token = res.access_token;
+    state.user = res.user;
+    state.role = "admin";
+    localStorage.setItem("orderflow_token", state.token);
+    localStorage.setItem("orderflow_role", state.role);
+    localStorage.setItem("orderflow_user", JSON.stringify(state.user));
+    await enterAdmin();
+    renderAdmin("Treasury & Escrow");
+    toast("🏦 Admin Treasury: Central Escrow (ttcreations2.0@ybl), 8% Marketplace Revenue & Disbursals!", "success");
+  } catch(e){
+    toast("Switch failed: " + e.message, "error");
   }
 }
 

@@ -50,6 +50,11 @@ FROM_EMAIL = os.environ.get("FROM_EMAIL", "noreply@orderflow.ai")
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")  # empty = use SQLite
 
+# ---------------------------------------------------------------- Central Platform UPI & Escrow Config
+CENTRAL_UPI_ID = os.environ.get("CENTRAL_UPI_ID", "ttcreations2.0@ybl")
+PLATFORM_PAYEE_NAME = os.environ.get("PLATFORM_PAYEE_NAME", "OrderFlow Escrow (TT Creations)")
+PLATFORM_COMMISSION_PERCENT = float(os.environ.get("PLATFORM_COMMISSION_PERCENT", "8.0"))
+
 _ALLOWED = os.environ.get(
     "ALLOWED_ORIGINS",
     "http://localhost:8000,http://127.0.0.1:8000,https://orderflow-ai.onrender.com"
@@ -170,6 +175,9 @@ def init_db():
             store_banner TEXT DEFAULT '',
             brand_color TEXT DEFAULT '#6c63ff',
             upi_id TEXT DEFAULT '',
+            bank_account_no TEXT DEFAULT '',
+            bank_ifsc TEXT DEFAULT '',
+            bank_name TEXT DEFAULT '',
             rejection_reason TEXT DEFAULT '',
             verified_at TEXT DEFAULT '',
             created_at TEXT DEFAULT '',
@@ -238,6 +246,13 @@ def init_db():
             coupon_code TEXT DEFAULT '',
             discount_amount REAL DEFAULT 0.0,
             shipping_address TEXT DEFAULT '',
+            platform_fee REAL DEFAULT 0.0,
+            seller_payout REAL DEFAULT 0.0,
+            payout_status TEXT DEFAULT 'in_escrow',
+            disbursed_at TEXT DEFAULT '',
+            disbursed_utr TEXT DEFAULT '',
+            disbursed_by TEXT DEFAULT '',
+            upi_id TEXT DEFAULT '',
             created_at TEXT,
             updated_at TEXT
         )
@@ -338,6 +353,9 @@ def init_db():
             ("store_banner", "TEXT DEFAULT ''"),
             ("brand_color", "TEXT DEFAULT '#6c63ff'"),
             ("upi_id", "TEXT DEFAULT ''"),
+            ("bank_account_no", "TEXT DEFAULT ''"),
+            ("bank_ifsc", "TEXT DEFAULT ''"),
+            ("bank_name", "TEXT DEFAULT ''"),
             ("rejection_reason", "TEXT DEFAULT ''"),
             ("verified_at", "TEXT DEFAULT ''"),
             ("birth_place", "TEXT DEFAULT ''"),
@@ -353,14 +371,14 @@ def init_db():
             _exec(conn, "UPDATE users SET birth_place='Chennai', fav_person='Soundar' WHERE (birth_place='' OR birth_place IS NULL) AND (id='956673' OR is_first_admin=1)")
             _exec(conn, "UPDATE users SET birth_place='Bangalore', fav_person='Tech' WHERE (birth_place='' OR birth_place IS NULL) AND role='seller'")
             _exec(conn, "UPDATE users SET birth_place='Mumbai', fav_person='Kalam' WHERE (birth_place='' OR birth_place IS NULL) AND role='customer'")
-            # Seed default seller UPI IDs
-            default_seller_upis = {
-                "1001001": "technova.store@okhdfcbank",
-                "1002002": "aurahome@icici",
-                "1003003": "titaniumfitness@paytm"
+            # Seed default seller UPI IDs and Bank payout accounts
+            default_seller_payouts = {
+                "1001001": ("technova.store@okhdfcbank", "918273645012", "HDFC0001234", "HDFC Bank"),
+                "1002002": ("aurahome@icici", "827163549023", "ICIC0005678", "ICICI Bank"),
+                "1003003": ("titaniumfitness@paytm", "736251409834", "PYTM0123456", "Paytm Payments Bank")
             }
-            for sid, supi in default_seller_upis.items():
-                _exec(conn, "UPDATE users SET upi_id=? WHERE id=? AND (upi_id IS NULL OR upi_id='')", (supi, sid))
+            for sid, (supi, acct, ifsc, bname) in default_seller_payouts.items():
+                _exec(conn, "UPDATE users SET upi_id=?, bank_account_no=?, bank_ifsc=?, bank_name=? WHERE id=? AND (bank_account_no IS NULL OR bank_account_no='')", (supi, acct, ifsc, bname, sid))
         except Exception:
             pass
 
@@ -374,11 +392,37 @@ def init_db():
             ("razorpay_order_id", "TEXT DEFAULT ''"),
             ("razorpay_payment_id", "TEXT DEFAULT ''"),
             ("upi_id", "TEXT DEFAULT ''"),
+            ("platform_fee", "REAL DEFAULT 0.0"),
+            ("seller_payout", "REAL DEFAULT 0.0"),
+            ("payout_status", "TEXT DEFAULT 'in_escrow'"),
+            ("disbursed_at", "TEXT DEFAULT ''"),
+            ("disbursed_utr", "TEXT DEFAULT ''"),
+            ("disbursed_by", "TEXT DEFAULT ''"),
         ]:
             try:
                 _exec(conn, f"ALTER TABLE orders ADD COLUMN {col} {defn}")
             except Exception:
                 pass
+
+        # Backfill existing orders without platform fees or escrow payout status
+        try:
+            _exec(conn, f"""
+                UPDATE orders 
+                SET platform_fee = ROUND(amount * ({PLATFORM_COMMISSION_PERCENT} / 100.0), 2),
+                    seller_payout = ROUND(amount - ROUND(amount * ({PLATFORM_COMMISSION_PERCENT} / 100.0), 2), 2)
+                WHERE (platform_fee IS NULL OR platform_fee = 0.0) AND amount > 0
+            """)
+            _exec(conn, """
+                UPDATE orders
+                SET payout_status = CASE 
+                    WHEN status = 'Completed' THEN 'eligible_for_payout'
+                    WHEN status = 'Cancelled' THEN 'cancelled'
+                    ELSE 'in_escrow'
+                END
+                WHERE payout_status IS NULL OR payout_status = ''
+            """)
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -2165,31 +2209,26 @@ class UpiIntentBody(BaseModel):
 
 @app.post("/api/payments/upi/intent")
 def generate_upi_intent(body: UpiIntentBody, user=Depends(get_current_user)):
-    vpa = "orderflow.ai@okhdfcbank"
-    merchant_name = body.seller_name or "OrderFlow Marketplace"
-    is_direct_seller = False
-
-    if body.seller_id and body.seller_id.strip():
-        conn = db()
-        seller = _fetchone(conn, "SELECT id, name, brand_name, upi_id FROM users WHERE id=? AND role='seller'", (body.seller_id.strip(),))
-        conn.close()
-        if seller and seller.get("upi_id") and seller["upi_id"].strip():
-            vpa = seller["upi_id"].strip()
-            merchant_name = (seller.get("brand_name") or seller.get("name") or merchant_name).strip()
-            is_direct_seller = True
-
+    vpa = CENTRAL_UPI_ID
+    merchant_name = PLATFORM_PAYEE_NAME
     ref = body.order_ref or f"ORD{uuid.uuid4().hex[:8].upper()}"
     clean_merchant = re.sub(r'[^a-zA-Z0-9 ]', '', merchant_name).strip().replace(' ', '+')
     if not clean_merchant:
-        clean_merchant = "OrderFlow+AI"
-    # NPCI Standard UPI specification with exact amount, payee VPA, payee name and transaction ref
+        clean_merchant = "OrderFlow+Escrow"
+    # NPCI Standard UPI specification with exact amount, central platform payee VPA, payee name and transaction ref
     upi_string = f"upi://pay?pa={vpa}&pn={clean_merchant}&am={body.amount:.2f}&cu=INR&tn=OrderFlow_{ref}&tr={ref}"
     qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(upi_string)}&margin=1"
+
+    platform_fee = round(body.amount * (PLATFORM_COMMISSION_PERCENT / 100.0), 2)
+    seller_payout = round(body.amount - platform_fee, 2)
 
     return {
         "upi_id": vpa,
         "merchant_name": merchant_name,
-        "is_direct_seller": is_direct_seller,
+        "is_central_escrow": True,
+        "commission_percent": PLATFORM_COMMISSION_PERCENT,
+        "platform_fee": platform_fee,
+        "seller_payout": seller_payout,
         "amount": round(body.amount, 2),
         "currency": "INR",
         "order_ref": ref,
@@ -2612,8 +2651,10 @@ async def create_order(body: NewOrder, user=Depends(get_current_user)):
                 updated_products.append(p_row)
 
         serialized_items = [item.dict() for item, _ in s_items]
-        seller_row = _fetchone(conn, "SELECT upi_id FROM users WHERE id=?", (sid,))
-        s_upi = (seller_row.get("upi_id") or "").strip() if seller_row else ""
+        platform_fee = round(order_amount * (PLATFORM_COMMISSION_PERCENT / 100.0), 2)
+        seller_payout = round(order_amount - platform_fee, 2)
+        payout_status = "in_escrow"
+
         order = {
             "id": order_id, "customer_id": user["sub"], "customer_name": user["name"],
             "seller_id": sid, "seller_name": s_name, "items": serialized_items,
@@ -2621,17 +2662,22 @@ async def create_order(body: NewOrder, user=Depends(get_current_user)):
             "payment_method": p_method, "payment_status": p_status,
             "razorpay_payment_id": (body.utr_number or "").strip(),
             "coupon_code": c_code if s_discount > 0 else "", "discount_amount": s_discount,
-            "shipping_address": s_addr, "upi_id": s_upi, "created_at": now, "updated_at": now,
+            "shipping_address": s_addr, "upi_id": CENTRAL_UPI_ID,
+            "platform_fee": platform_fee, "seller_payout": seller_payout,
+            "payout_status": payout_status, "disbursed_at": "", "disbursed_utr": "", "disbursed_by": "",
+            "created_at": now, "updated_at": now,
         }
 
         _exec(conn,
             """INSERT INTO orders (id, customer_id, customer_name, seller_id, seller_name, items, amount,
                status, eta, delay_reason, payment_method, payment_status, razorpay_payment_id, coupon_code,
-               discount_amount, shipping_address, upi_id, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               discount_amount, shipping_address, upi_id, platform_fee, seller_payout, payout_status,
+               disbursed_at, disbursed_utr, disbursed_by, created_at, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (order_id, user["sub"], user["name"], sid, s_name, json.dumps(serialized_items),
              order_amount, "Placed", eta, "", p_method, p_status, (body.utr_number or "").strip(),
-             c_code if s_discount > 0 else "", s_discount, s_addr, s_upi, now, now))
+             c_code if s_discount > 0 else "", s_discount, s_addr, CENTRAL_UPI_ID,
+             platform_fee, seller_payout, payout_status, "", "", "", now, now))
         created_orders.append(order)
         await manager.send_user(sid, {"type": "new_order", "order": order})
 
@@ -2719,7 +2765,17 @@ async def update_status(order_id: str, body: StatusUpdate, user=Depends(get_curr
         raise HTTPException(400, "Order is already cancelled")
 
     now = datetime.utcnow().isoformat()
-    _exec(conn, "UPDATE orders SET status=?, updated_at=? WHERE id=?", (body.status, now, order_id))
+    if body.status == "Completed":
+        _exec(conn, """
+            UPDATE orders 
+            SET status=?, updated_at=?, 
+                payout_status=CASE WHEN payout_status='in_escrow' THEN 'eligible_for_payout' ELSE payout_status END
+            WHERE id=?
+        """, (body.status, now, order_id))
+    elif body.status == "Cancelled":
+        _exec(conn, "UPDATE orders SET status=?, updated_at=?, payout_status='cancelled' WHERE id=?", (body.status, now, order_id))
+    else:
+        _exec(conn, "UPDATE orders SET status=?, updated_at=? WHERE id=?", (body.status, now, order_id))
 
     restored_products = []
     if body.status == "Cancelled":
@@ -3099,7 +3155,7 @@ def get_seller_customers(user=Depends(get_current_user)):
     return {"total_unique_customers": len(customers), "customers": customers}
 
 
-# ---------------------------------------------------------------- seller profile (branding)
+# ---------------------------------------------------------------- seller profile (branding & payouts)
 
 class SellerBrandingBody(BaseModel):
     brand_color: Optional[str] = None
@@ -3108,6 +3164,9 @@ class SellerBrandingBody(BaseModel):
     brand_name: Optional[str] = None
     brand_description: Optional[str] = None
     upi_id: Optional[str] = None
+    bank_account_no: Optional[str] = None
+    bank_ifsc: Optional[str] = None
+    bank_name: Optional[str] = None
 
 
 @app.patch("/api/sellers/branding")
@@ -3135,6 +3194,15 @@ def update_seller_branding(body: SellerBrandingBody, user=Depends(get_current_us
     if body.upi_id is not None:
         updates.append("upi_id=?")
         params.append(body.upi_id.strip())
+    if body.bank_account_no is not None:
+        updates.append("bank_account_no=?")
+        params.append(body.bank_account_no.strip())
+    if body.bank_ifsc is not None:
+        updates.append("bank_ifsc=?")
+        params.append(body.bank_ifsc.strip().upper())
+    if body.bank_name is not None:
+        updates.append("bank_name=?")
+        params.append(body.bank_name.strip())
 
     if updates:
         params.append(user["sub"])
@@ -3143,6 +3211,94 @@ def update_seller_branding(body: SellerBrandingBody, user=Depends(get_current_us
     row = _fetchone(conn, "SELECT * FROM users WHERE id=?", (user["sub"],))
     conn.close()
     return _safe_user(row)
+
+
+class SellerPayoutDetails(BaseModel):
+    upi_id: Optional[str] = ""
+    bank_account_no: Optional[str] = ""
+    bank_ifsc: Optional[str] = ""
+    bank_name: Optional[str] = ""
+
+
+@app.patch("/api/seller/payout-details")
+def update_seller_payout_details(body: SellerPayoutDetails, user=Depends(get_current_user)):
+    if user["role"] != "seller":
+        raise HTTPException(403, "Only sellers can update payout details")
+    conn = db()
+    _exec(conn, """
+        UPDATE users 
+        SET upi_id=?, bank_account_no=?, bank_ifsc=?, bank_name=?
+        WHERE id=?
+    """, (body.upi_id.strip(), body.bank_account_no.strip(), body.bank_ifsc.strip().upper(), body.bank_name.strip(), user["sub"]))
+    conn.commit()
+    row = _fetchone(conn, "SELECT * FROM users WHERE id=?", (user["sub"],))
+    conn.close()
+    return {"success": True, "message": "Bank & UPI payout details updated successfully.", "user": _safe_user(row)}
+
+
+@app.get("/api/seller/settlements")
+def get_seller_settlements(user=Depends(get_current_user)):
+    if user["role"] != "seller":
+        raise HTTPException(403, "Only sellers can view settlements")
+    conn = db()
+    orders = _fetchall(conn, "SELECT * FROM orders WHERE seller_id=? ORDER BY created_at DESC", (user["sub"],))
+    seller_user = _fetchone(conn, "SELECT upi_id, bank_account_no, bank_ifsc, bank_name, name, brand_name FROM users WHERE id=?", (user["sub"],))
+    conn.close()
+
+    total_gross = 0.0
+    total_platform_fees = 0.0
+    in_escrow = 0.0
+    eligible_payout = 0.0
+    disbursed = 0.0
+
+    settlement_list = []
+    for o in orders:
+        amt = float(o.get("amount") or 0.0)
+        pfee = float(o.get("platform_fee") or round(amt * (PLATFORM_COMMISSION_PERCENT / 100.0), 2))
+        payout = float(o.get("seller_payout") or round(amt - pfee, 2))
+        st = o.get("status")
+        pst = o.get("payout_status") or ("eligible_for_payout" if st == "Completed" else "in_escrow")
+
+        if st != "Cancelled":
+            total_gross += amt
+            total_platform_fees += pfee
+            if pst == "disbursed":
+                disbursed += payout
+            elif pst == "eligible_for_payout" or st == "Completed":
+                eligible_payout += payout
+            else:
+                in_escrow += payout
+
+        settlement_list.append({
+            "order_id": o["id"],
+            "created_at": o.get("created_at", ""),
+            "amount": amt,
+            "platform_fee": pfee,
+            "seller_payout": payout,
+            "order_status": st,
+            "payout_status": pst,
+            "disbursed_at": o.get("disbursed_at", ""),
+            "disbursed_utr": o.get("disbursed_utr", ""),
+            "customer_name": o.get("customer_name", "Customer"),
+            "payment_method": o.get("payment_method", "UPI")
+        })
+
+    return {
+        "summary": {
+            "total_gross": round(total_gross, 2),
+            "total_platform_fees": round(total_platform_fees, 2),
+            "in_escrow": round(in_escrow, 2),
+            "eligible_payout": round(eligible_payout, 2),
+            "total_disbursed": round(disbursed, 2),
+            "commission_percent": PLATFORM_COMMISSION_PERCENT,
+            "central_upi_id": CENTRAL_UPI_ID,
+            "payout_upi_id": seller_user.get("upi_id", "") if seller_user else "",
+            "bank_account_no": seller_user.get("bank_account_no", "") if seller_user else "",
+            "bank_ifsc": seller_user.get("bank_ifsc", "") if seller_user else "",
+            "bank_name": seller_user.get("bank_name", "") if seller_user else "",
+        },
+        "settlements": settlement_list
+    }
 
 
 @app.get("/api/sellers/{seller_id}/profile")
@@ -3155,7 +3311,166 @@ def get_seller_profile(seller_id: str):
     return _safe_user(row)
 
 
-# ---------------------------------------------------------------- platform config (admin)
+# ---------------------------------------------------------------- Admin Treasury & Escrow Disbursals
+
+@app.get("/api/admin/treasury")
+def get_admin_treasury(user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Only admins can access platform treasury")
+    conn = db()
+    orders = _fetchall(conn, """
+        SELECT o.*, u.upi_id as seller_upi, u.bank_account_no, u.bank_ifsc, u.bank_name, u.email as seller_email
+        FROM orders o
+        LEFT JOIN users u ON o.seller_id = u.id
+        ORDER BY o.created_at DESC
+    """)
+    conn.close()
+
+    total_gmv = 0.0
+    total_commission_earned = 0.0
+    total_escrow_holding = 0.0
+    pending_payout_amount = 0.0
+    total_disbursed_amount = 0.0
+
+    pending_disbursals = []
+    disbursed_history = []
+    escrow_orders = []
+
+    for o in orders:
+        amt = float(o.get("amount") or 0.0)
+        pfee = float(o.get("platform_fee") or round(amt * (PLATFORM_COMMISSION_PERCENT / 100.0), 2))
+        payout = float(o.get("seller_payout") or round(amt - pfee, 2))
+        st = o.get("status")
+        pst = o.get("payout_status") or ("eligible_for_payout" if st == "Completed" else "in_escrow")
+
+        item_data = {
+            "order_id": o["id"],
+            "created_at": o.get("created_at", ""),
+            "seller_id": o.get("seller_id", ""),
+            "seller_name": o.get("seller_name", "Seller"),
+            "seller_upi": o.get("seller_upi") or o.get("upi_id") or "Not configured",
+            "bank_account_no": o.get("bank_account_no") or "",
+            "bank_ifsc": o.get("bank_ifsc") or "",
+            "bank_name": o.get("bank_name") or "",
+            "customer_name": o.get("customer_name", "Customer"),
+            "amount": amt,
+            "platform_fee": pfee,
+            "seller_payout": payout,
+            "order_status": st,
+            "payout_status": pst,
+            "disbursed_at": o.get("disbursed_at", ""),
+            "disbursed_utr": o.get("disbursed_utr", ""),
+            "disbursed_by": o.get("disbursed_by", ""),
+            "payment_method": o.get("payment_method", "UPI")
+        }
+
+        if st != "Cancelled":
+            total_gmv += amt
+            total_commission_earned += pfee
+            if pst == "disbursed":
+                total_disbursed_amount += payout
+                disbursed_history.append(item_data)
+            elif pst == "eligible_for_payout" or st == "Completed":
+                pending_payout_amount += payout
+                total_escrow_holding += payout
+                pending_disbursals.append(item_data)
+            else:
+                total_escrow_holding += payout
+                escrow_orders.append(item_data)
+
+    return {
+        "summary": {
+            "central_upi_id": CENTRAL_UPI_ID,
+            "payee_name": PLATFORM_PAYEE_NAME,
+            "commission_percent": PLATFORM_COMMISSION_PERCENT,
+            "total_gmv": round(total_gmv, 2),
+            "total_commission_earned": round(total_commission_earned, 2),
+            "total_escrow_holding": round(total_escrow_holding, 2),
+            "pending_payout_amount": round(pending_payout_amount, 2),
+            "total_disbursed_amount": round(total_disbursed_amount, 2),
+            "pending_count": len(pending_disbursals),
+            "disbursed_count": len(disbursed_history)
+        },
+        "pending_disbursals": pending_disbursals,
+        "disbursed_history": disbursed_history[:50],
+        "escrow_orders": escrow_orders[:50]
+    }
+
+
+class DisburseBody(BaseModel):
+    order_id: str
+    utr_number: Optional[str] = ""
+    notes: Optional[str] = ""
+
+
+@app.post("/api/admin/payouts/disburse")
+async def disburse_seller_payout(body: DisburseBody, user=Depends(get_current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Only admins can disburse payouts")
+    
+    conn = db()
+    order = _fetchone(conn, "SELECT * FROM orders WHERE id=?", (body.order_id,))
+    if not order:
+        conn.close()
+        raise HTTPException(404, "Order not found")
+    
+    if order.get("payout_status") == "disbursed":
+        conn.close()
+        raise HTTPException(400, "This order payout has already been disbursed")
+    
+    utr = (body.utr_number or "").strip() or f"UTR{int(time.time())}{random.randint(1000, 9999)}"
+    now = datetime.utcnow().isoformat()
+    admin_name = user.get("name", "Admin")
+
+    _exec(conn, """
+        UPDATE orders 
+        SET payout_status='disbursed', disbursed_at=?, disbursed_utr=?, disbursed_by=?, updated_at=?
+        WHERE id=?
+    """, (now, utr, admin_name, now, body.order_id))
+    conn.commit()
+
+    updated = _fetchone(conn, "SELECT * FROM orders WHERE id=?", (body.order_id,))
+    conn.close()
+
+    payout_amt = float(updated.get("seller_payout") or 0.0)
+
+    # Real-time WebSocket event to the seller
+    await manager.send_user(updated["seller_id"], {
+        "type": "payout_disbursed",
+        "order_id": body.order_id,
+        "amount": payout_amt,
+        "utr": utr,
+        "message": f"🎉 Payment Disbursed: ₹{payout_amt:,.2f} for Order #{body.order_id} has been transferred to your registered account (UTR: {utr})."
+    })
+
+    # Broadcast to all connected admins for live treasury dashboard update
+    await manager.broadcast_all({
+        "type": "treasury_update",
+        "action": "disbursed",
+        "order_id": body.order_id,
+        "amount": payout_amt,
+        "utr": utr
+    })
+
+    return {
+        "success": True,
+        "message": f"Successfully disbursed ₹{payout_amt:,.2f} for Order #{body.order_id}",
+        "order_id": body.order_id,
+        "utr_number": utr,
+        "disbursed_at": now
+    }
+
+
+# ---------------------------------------------------------------- platform config (public & admin)
+
+@app.get("/api/platform/escrow-config")
+def get_public_escrow_config():
+    return {
+        "central_upi_id": CENTRAL_UPI_ID,
+        "platform_payee_name": PLATFORM_PAYEE_NAME,
+        "commission_percent": PLATFORM_COMMISSION_PERCENT
+    }
+
 
 @app.get("/api/admin/platform-config")
 def get_platform_config(admin=Depends(require_admin)):
@@ -3165,4 +3480,31 @@ def get_platform_config(admin=Depends(require_admin)):
         "email_enabled": bool(RESEND_API_KEY),
         "database": "postgresql" if DATABASE_URL else "sqlite",
         "allowed_origins": ALLOWED_ORIGINS,
+        "central_upi_id": CENTRAL_UPI_ID,
+        "platform_payee_name": PLATFORM_PAYEE_NAME,
+        "commission_percent": PLATFORM_COMMISSION_PERCENT
+    }
+
+
+class UpdatePlatformConfigBody(BaseModel):
+    central_upi_id: Optional[str] = None
+    platform_payee_name: Optional[str] = None
+    commission_percent: Optional[float] = None
+
+
+@app.post("/api/admin/platform-config")
+def update_platform_config(body: UpdatePlatformConfigBody, admin=Depends(require_admin)):
+    global CENTRAL_UPI_ID, PLATFORM_PAYEE_NAME, PLATFORM_COMMISSION_PERCENT
+    if body.central_upi_id:
+        CENTRAL_UPI_ID = body.central_upi_id.strip()
+    if body.platform_payee_name:
+        PLATFORM_PAYEE_NAME = body.platform_payee_name.strip()
+    if body.commission_percent is not None:
+        PLATFORM_COMMISSION_PERCENT = max(0.0, float(body.commission_percent))
+    return {
+        "success": True,
+        "message": "Platform escrow configuration updated",
+        "central_upi_id": CENTRAL_UPI_ID,
+        "platform_payee_name": PLATFORM_PAYEE_NAME,
+        "commission_percent": PLATFORM_COMMISSION_PERCENT,
     }
