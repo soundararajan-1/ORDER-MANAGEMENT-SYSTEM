@@ -592,6 +592,14 @@ def serve_sw():
     raise HTTPException(404, "sw.js not found")
 
 
+@app.get("/qrcode.min.js")
+def serve_qrcode():
+    js_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "qrcode.min.js"))
+    if os.path.exists(js_path):
+        return FileResponse(js_path, media_type="application/javascript")
+    raise HTTPException(404, "qrcode.min.js not found")
+
+
 init_db()
 
 # ---------------------------------------------------------------- JWT auth
@@ -2217,7 +2225,7 @@ def generate_upi_intent(body: UpiIntentBody, user=Depends(get_current_user)):
         clean_merchant = "OrderFlow+Escrow"
     # NPCI Standard UPI specification with exact amount, central platform payee VPA, payee name and transaction ref
     upi_string = f"upi://pay?pa={vpa}&pn={clean_merchant}&am={body.amount:.2f}&cu=INR&tn=OrderFlow_{ref}&tr={ref}"
-    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={urllib.parse.quote(upi_string)}&margin=1"
+    qr_url = f"https://quickchart.io/qr?size=300&text={urllib.parse.quote(upi_string)}&margin=1"
 
     platform_fee = round(body.amount * (PLATFORM_COMMISSION_PERCENT / 100.0), 2)
     seller_payout = round(body.amount - platform_fee, 2)

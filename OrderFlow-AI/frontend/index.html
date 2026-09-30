@@ -15,6 +15,8 @@
   }
 </script>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -218,6 +220,89 @@ const CONFIG = {
     ? overrideApi.replace(/^http/, "ws") 
     : (isDevFrontend ? "ws://localhost:8000" : (window.location.protocol === "https:" ? "wss://" : "ws://") + window.location.host),
 };
+
+/* ================= UNIVERSAL UPI QR RENDERER (Client-Side Vector + Triple Cloud Failover) ================= */
+function renderUpiQr(container, upiUrl, width=160, height=160){
+  const el = typeof container === "string" ? document.getElementById(container) : container;
+  if(!el) return;
+  el.innerHTML = "";
+  el.dataset.upiUrl = upiUrl;
+
+  // 1. Primary Strategy: Instant Client-Side Vector Generation (0ms, 100% Offline, No Network Calls)
+  if(typeof QRCode !== "undefined"){
+    try {
+      new QRCode(el, {
+        text: upiUrl,
+        width: width,
+        height: height,
+        colorDark: "#050816",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+      });
+      const canvasOrImg = el.querySelector("canvas, img");
+      if(canvasOrImg){
+        canvasOrImg.style.width = width + "px";
+        canvasOrImg.style.height = height + "px";
+        canvasOrImg.style.display = "block";
+        canvasOrImg.style.margin = "0 auto";
+        canvasOrImg.style.borderRadius = "8px";
+        return;
+      }
+    } catch(err){
+      console.warn("Client QRCode engine error:", err);
+    }
+  }
+
+  // 2. High-Availability Multi-Cloud Cascading Failover (QuickChart -> Google Charts -> QRServer)
+  const encoded = encodeURIComponent(upiUrl);
+  const providers = [
+    `https://quickchart.io/qr?size=${width}&text=${encoded}&margin=1`,
+    `https://chart.googleapis.com/chart?chs=${width}x${height}&cht=qr&chl=${encoded}&choe=UTF-8`,
+    `https://api.qrserver.com/v1/create-qr-code/?size=${width}x${height}&data=${encoded}&margin=1`
+  ];
+
+  const img = document.createElement("img");
+  img.style.width = width + "px";
+  img.style.height = height + "px";
+  img.style.display = "block";
+  img.style.margin = "0 auto";
+  img.className = "select-none pointer-events-none rounded-lg";
+  img.alt = "Dynamic UPI QR";
+
+  let attempt = 0;
+  img.onerror = function(){
+    attempt++;
+    if(attempt < providers.length){
+      img.src = providers[attempt];
+    } else {
+      // 3. Fallback: Interactive UPI App Deeplink
+      el.innerHTML = `
+        <div class="p-2 text-center text-xs bg-slate-900/90 text-white rounded-xl border border-cyan-500/40">
+          <p class="font-bold text-amber-300 text-[10px] mb-1">⚡ UPI Direct Pay</p>
+          <a href="${upiUrl}" class="btn-neon text-[10px] px-2.5 py-1 inline-block my-1 font-bold">Open in UPI App ↗</a>
+          <p class="text-[9px] text-cyan-300 font-mono mt-0.5">ttcreations2.0@ybl</p>
+        </div>
+      `;
+    }
+  };
+
+  img.src = providers[0];
+  el.appendChild(img);
+}
+
+// Auto-fallback dynamic loader if QRCode library isn't available yet
+if(typeof QRCode === "undefined" && !window._qrCodeScriptLoading){
+  window._qrCodeScriptLoading = true;
+  const s = document.createElement("script");
+  s.src = "/qrcode.min.js";
+  s.onload = () => {
+    const cartEl = document.getElementById("cartUpiQrBox");
+    if(cartEl && cartEl.dataset.upiUrl) renderUpiQr(cartEl, cartEl.dataset.upiUrl, 112, 112);
+    const modalEl = document.getElementById("modalUpiQrBox");
+    if(modalEl && modalEl.dataset.upiUrl) renderUpiQr(modalEl, modalEl.dataset.upiUrl, 208, 208);
+  };
+  document.head.appendChild(s);
+}
 
 /* ================= STATE ================= */
 const state = {
@@ -1984,20 +2069,13 @@ function openCart(){
 
   const finalPayable = Math.max(0, rawSubtotal - discountAmount);
   const sellersInCart = Array.from(new Set(state.cart.map(i=>i.seller_name || 'Verified Seller')));
-  const cartSellerIds = Array.from(new Set(state.cart.map(i=>{
-    const p = state.products.find(x => x.id === i.product_id);
-    return p ? p.seller_id : null;
-  }).filter(Boolean)));
-  const primarySellerId = cartSellerIds.length === 1 ? cartSellerIds[0] : "";
-  const primaryProduct = state.cart.length > 0 ? state.products.find(x => x.id === state.cart[0].product_id) : null;
-  const cartSellerUpiId = (primarySellerId && primaryProduct && primaryProduct.seller_upi_id)
-    ? primaryProduct.seller_upi_id.trim()
-    : "orderflow.ai@okhdfcbank";
-  const cartSellerDisplayName = (primarySellerId && primaryProduct && (primaryProduct.seller_name || primaryProduct.brand_name))
-    ? (primaryProduct.seller_name || primaryProduct.brand_name)
-    : (sellersInCart[0] || "OrderFlow Marketplace");
-  const cleanCartSellerName = cartSellerDisplayName.replace(/[^a-zA-Z0-9 ]/g, '').trim().replace(/\s+/g, '+') || "OrderFlow+AI";
-  const cartUpiLink = `upi://pay?pa=${encodeURIComponent(cartSellerUpiId)}&pn=${cleanCartSellerName}&am=${finalPayable.toFixed(2)}&cu=INR&tn=OrderFlow_Cart`;
+
+  // Model B: Central Platform Escrow UPI Configuration
+  const centralEscrowVpa = "ttcreations2.0@ybl";
+  const centralEscrowPayee = "OrderFlow Escrow (TT Creations)";
+  const cleanPayee = "OrderFlow+Escrow";
+  const cartOrderRef = "CRT" + Math.floor(100000 + Math.random() * 900000);
+  const cartUpiLink = `upi://pay?pa=${encodeURIComponent(centralEscrowVpa)}&pn=${cleanPayee}&am=${finalPayable.toFixed(2)}&cu=INR&tn=OrderFlow_${cartOrderRef}&tr=${cartOrderRef}`;
 
   drawer.innerHTML = `
     <div class="glass glow-border h-full p-5 sm:p-6 flex flex-col pop-in bg-[#070b22]/98 border-cyan-400/40 overflow-hidden">
@@ -2107,16 +2185,16 @@ function openCart(){
                   <span class="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
                     <span>⚡ Dynamic UPI Instant Pay</span>
                   </span>
-                  <span class="text-[9px] ${primarySellerId && primaryProduct?.seller_upi_id ? 'bg-cyan-500/20 text-cyan-300 border-cyan-400/40' : 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'} font-semibold px-2 py-0.5 rounded-full border">
-                    ${primarySellerId && primaryProduct?.seller_upi_id ? 'Direct to Seller Bank' : 'NPCI Certified'}
+                  <span class="text-[9px] bg-emerald-500/20 text-emerald-300 border-emerald-400/40 font-semibold px-2 py-0.5 rounded-full border">
+                    🔒 Central Platform Escrow
                   </span>
                 </div>
 
                 <div class="relative inline-block p-2 rounded-2xl bg-white text-slate-900 shadow-[0_0_20px_rgba(0,229,255,0.3)] border-2 border-cyan-400/70 overflow-hidden">
                   <div class="qr-laser"></div>
-                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(cartUpiLink)}&margin=1" alt="Dynamic UPI QR" class="w-24 h-24 sm:w-28 sm:h-28 block pointer-events-none select-none" />
+                  <div id="cartUpiQrBox" class="w-28 h-28 flex items-center justify-center bg-white rounded-xl overflow-hidden p-1"></div>
                   <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div class="w-6 h-6 rounded bg-slate-900 border border-cyan-400 flex items-center justify-center">
+                    <div class="w-6 h-6 rounded bg-slate-900 border border-cyan-400 flex items-center justify-center shadow">
                       <span class="text-[8px] font-black text-cyan-300">UPI</span>
                     </div>
                   </div>
@@ -2133,12 +2211,16 @@ function openCart(){
                 <div class="p-2.5 rounded-xl bg-black/40 border border-white/10 text-left space-y-1">
                   <div class="flex items-center justify-between text-[11px]">
                     <span class="text-white/50 text-[10px]">Beneficiary:</span>
-                    <span class="font-semibold text-white truncate max-w-[170px] text-[10px]">${cartSellerDisplayName}</span>
+                    <span class="font-semibold text-white truncate max-w-[170px] text-[10px]">OrderFlow Escrow (TT Creations)</span>
                   </div>
                   <div class="flex items-center justify-between text-[11px]">
-                    <span class="text-white/50 text-[10px]">UPI VPA:</span>
-                    <span class="font-mono text-cyan-300 font-semibold text-[10px] truncate max-w-[150px]">${cartSellerUpiId}</span>
-                    <button type="button" onclick="navigator.clipboard.writeText('${cartSellerUpiId}'); toast('Seller UPI ID copied!', 'success');" class="text-[10px] text-cyan-400 hover:text-cyan-200 underline cursor-pointer">Copy</button>
+                    <span class="text-white/50 text-[10px]">Escrow VPA:</span>
+                    <span class="font-mono text-amber-300 font-bold text-[10px] truncate max-w-[150px]">ttcreations2.0@ybl</span>
+                    <button type="button" onclick="navigator.clipboard.writeText('ttcreations2.0@ybl'); toast('Platform Escrow UPI ID copied!', 'success');" class="text-[10px] text-cyan-400 hover:text-cyan-200 underline cursor-pointer">Copy</button>
+                  </div>
+                  <div class="flex items-center justify-between text-[10px] pt-1 border-t border-white/5 text-emerald-400 font-medium">
+                    <span>🔒 Model B 100% Escrow</span>
+                    <span>8% Fee · 92% to Seller</span>
                   </div>
                 </div>
               </div>
@@ -2273,6 +2355,13 @@ function openCart(){
 
   const co = document.getElementById("checkoutBtn");
   if(co) co.onclick = placeOrder;
+
+  // Render QR code inside Cart Drawer
+  if(state.selectedPaymentMethod === 'UPI'){
+    setTimeout(() => {
+      renderUpiQr("cartUpiQrBox", cartUpiLink, 112, 112);
+    }, 15);
+  }
 }
 
 let upiCountdownTimer = null;
@@ -2286,7 +2375,7 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
   const merchantDisplayName = "OrderFlow Escrow (TT Creations)";
   const cleanMerchant = "OrderFlow+Escrow";
   const upiDeepLink = `upi://pay?pa=${encodeURIComponent(initialVpa)}&pn=${cleanMerchant}&am=${finalPayable.toFixed(2)}&cu=INR&tn=OrderFlow_${orderRef}&tr=${orderRef}`;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(upiDeepLink)}&margin=1`;
+  const qrUrl = `https://quickchart.io/qr?size=280&text=${encodeURIComponent(upiDeepLink)}&margin=1`;
 
   let intentData = {
     upi_id: initialVpa,
@@ -2354,7 +2443,7 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
             <!-- QR Container with Laser Line -->
             <div class="relative p-2.5 rounded-2xl bg-white shadow-[0_0_30px_rgba(0,229,255,0.25)] border-2 border-cyan-400/60 overflow-hidden">
               <div class="qr-laser"></div>
-              <img id="upiQrImage" src="${intentData.qr_url}" alt="Dynamic UPI QR" class="w-48 h-48 sm:w-52 sm:h-52 object-contain block select-none pointer-events-none" />
+              <div id="modalUpiQrBox" class="w-48 h-48 sm:w-52 sm:h-52 flex items-center justify-center bg-white rounded-xl overflow-hidden p-1.5"></div>
               
               <!-- Center UPI Badge Overlay -->
               <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -2495,6 +2584,11 @@ async function openDynamicUpiModal(finalPayable, rawSubtotal, discountAmount, ad
       </div>
     </div>
   `;
+
+  // Render High-Resolution QR Vector into Modal
+  setTimeout(() => {
+    renderUpiQr("modalUpiQrBox", intentData.upi_string || upiDeepLink, 208, 208);
+  }, 15);
 
   // Start Expiry Timer
   const timerDisplay = document.getElementById("upiTimerDisplay");
